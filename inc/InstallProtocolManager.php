@@ -137,7 +137,7 @@ class InstallProtocolManager
 
         if (!empty($data['id'])) {
             $stmt = $pdo->prepare('
-                UPDATE install_protocols
+                UPDATE protocols
                 SET slug = ?, name = ?, description = ?, definition = ?, is_active = ?, updated_at = NOW()
                 WHERE id = ?
             ');
@@ -153,7 +153,7 @@ class InstallProtocolManager
         }
 
         $stmt = $pdo->prepare('
-            INSERT INTO install_protocols (slug, name, description, definition, is_active)
+            INSERT INTO protocols (slug, name, description, definition, is_active)
             VALUES (?, ?, ?, ?, ?)
         ');
         $stmt->execute([
@@ -170,7 +170,7 @@ class InstallProtocolManager
     public static function delete(int $id): void
     {
         $pdo = DB::conn();
-        $stmt = $pdo->prepare('DELETE FROM install_protocols WHERE id = ?');
+        $stmt = $pdo->prepare('DELETE FROM protocols WHERE id = ?');
         $stmt->execute([$id]);
     }
 

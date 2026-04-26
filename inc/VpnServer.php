@@ -459,7 +459,7 @@ class VpnServer
      * @param bool|null $sudo True = use sudo, false = no sudo, null = auto-detect for docker commands
      * @return string The command output
      */
-    public function executeCommand(string $command, bool $sudo = null): string
+    public function executeCommand(string $command, ?bool $sudo = null): string
     {
         $baseCommand = $command;
         $pathPrefix = 'export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH; ';
