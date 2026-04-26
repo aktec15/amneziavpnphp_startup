@@ -13,29 +13,27 @@
     {% block styles %}{% endblock %}
     <style>
         :root {
-            --bg: #0b1017;
-            --bg-soft: #111827;
-            --surface: #16202c;
-            --surface-strong: #1d2937;
-            --surface-muted: #233244;
-            --border: #334155;
-            --border-soft: #263445;
-            --text: #e5edf6;
-            --text-muted: #9fb0c3;
-            --text-soft: #cbd5e1;
-            --accent: #14b8a6;
-            --accent-strong: #0f766e;
-            --accent-blue: #38bdf8;
+            --bg: #0f1115;
+            --bg-soft: #131720;
+            --surface: #1a1f2a;
+            --surface-strong: #202633;
+            --surface-muted: #262d3a;
+            --border: #333b49;
+            --border-soft: #2a313d;
+            --text: #e6e8ec;
+            --text-muted: #a6adbb;
+            --text-soft: #c7ccd6;
+            --accent: #3b82f6;
+            --accent-strong: #2563eb;
+            --accent-blue: #60a5fa;
             --danger: #f87171;
             --warning: #fbbf24;
             --success: #34d399;
-            --shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+            --shadow: 0 12px 32px rgba(0, 0, 0, 0.26);
         }
 
         .gradient-bg {
-            background:
-                linear-gradient(135deg, rgba(20, 184, 166, 0.18) 0%, rgba(56, 189, 248, 0.12) 48%, rgba(15, 23, 42, 0.96) 100%),
-                #0f172a;
+            background: #181d27;
         }
         .mobile-menu {
             display: none;
@@ -56,15 +54,13 @@
 
         body {
             min-height: 100vh;
-            background:
-                radial-gradient(circle at top left, rgba(20, 184, 166, 0.10), transparent 34rem),
-                linear-gradient(180deg, #0b1017 0%, #0f1722 55%, #0b1017 100%);
+            background: var(--bg);
             color: var(--text);
         }
 
         nav.gradient-bg {
-            border-bottom: 1px solid rgba(148, 163, 184, 0.20);
-            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.26);
+            border-bottom: 1px solid var(--border);
+            box-shadow: 0 8px 20px rgba(0, 0, 0, 0.20);
         }
 
         footer,
@@ -87,7 +83,7 @@
         .bg-green-50,
         .bg-yellow-50,
         .bg-red-50 {
-            background-color: rgba(20, 184, 166, 0.10) !important;
+            background-color: var(--surface-strong) !important;
         }
 
         .bg-blue-100 {
@@ -108,14 +104,14 @@
 
         .bg-purple-600,
         .bg-blue-600 {
-            background-color: #0f766e !important;
+            background-color: var(--accent-strong) !important;
         }
 
         .bg-purple-700,
         .bg-blue-700,
         .hover\:bg-purple-700:hover,
         .hover\:bg-blue-700:hover {
-            background-color: #115e59 !important;
+            background-color: #1d4ed8 !important;
         }
 
         .bg-green-500,
@@ -238,15 +234,14 @@
         select:focus,
         textarea:focus {
             border-color: var(--accent) !important;
-            box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.20) !important;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.22) !important;
         }
 
         button.gradient-bg,
         a.gradient-bg,
         .gradient-bg[type="submit"] {
-            background:
-                linear-gradient(135deg, var(--accent-strong), #0369a1) !important;
-            box-shadow: 0 10px 26px rgba(3, 105, 161, 0.25);
+            background: var(--accent-strong) !important;
+            box-shadow: none;
         }
 
         button.gradient-bg:hover,
@@ -270,14 +265,14 @@
         }
 
         .hover\:bg-purple-50:hover {
-            background-color: rgba(20, 184, 166, 0.16) !important;
+            background-color: var(--surface-muted) !important;
         }
 
         .focus\:ring-purple-500:focus,
         .focus\:ring-blue-500:focus,
         .focus\:ring-green-500:focus,
         .focus\:ring-red-500:focus {
-            --tw-ring-color: rgba(20, 184, 166, 0.35) !important;
+            --tw-ring-color: rgba(59, 130, 246, 0.35) !important;
         }
 
         .focus\:border-purple-500:focus,
@@ -296,7 +291,7 @@
         }
 
         ::selection {
-            background: rgba(20, 184, 166, 0.35);
+            background: rgba(59, 130, 246, 0.35);
         }
     </style>
 </head>
