@@ -12,8 +12,30 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     {% block styles %}{% endblock %}
     <style>
+        :root {
+            --bg: #0b1017;
+            --bg-soft: #111827;
+            --surface: #16202c;
+            --surface-strong: #1d2937;
+            --surface-muted: #233244;
+            --border: #334155;
+            --border-soft: #263445;
+            --text: #e5edf6;
+            --text-muted: #9fb0c3;
+            --text-soft: #cbd5e1;
+            --accent: #14b8a6;
+            --accent-strong: #0f766e;
+            --accent-blue: #38bdf8;
+            --danger: #f87171;
+            --warning: #fbbf24;
+            --success: #34d399;
+            --shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+        }
+
         .gradient-bg {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background:
+                linear-gradient(135deg, rgba(20, 184, 166, 0.18) 0%, rgba(56, 189, 248, 0.12) 48%, rgba(15, 23, 42, 0.96) 100%),
+                #0f172a;
         }
         .mobile-menu {
             display: none;
@@ -27,9 +49,258 @@
         .language-dropdown.active {
             display: block;
         }
+
+        html {
+            background: var(--bg);
+        }
+
+        body {
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at top left, rgba(20, 184, 166, 0.10), transparent 34rem),
+                linear-gradient(180deg, #0b1017 0%, #0f1722 55%, #0b1017 100%);
+            color: var(--text);
+        }
+
+        nav.gradient-bg {
+            border-bottom: 1px solid rgba(148, 163, 184, 0.20);
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.26);
+        }
+
+        footer,
+        .bg-white {
+            background-color: var(--surface) !important;
+        }
+
+        .bg-gray-50,
+        .bg-gray-100 {
+            background-color: var(--bg-soft) !important;
+        }
+
+        .bg-gray-200,
+        .bg-gray-300 {
+            background-color: var(--surface-muted) !important;
+        }
+
+        .bg-purple-50,
+        .bg-blue-50,
+        .bg-green-50,
+        .bg-yellow-50,
+        .bg-red-50 {
+            background-color: rgba(20, 184, 166, 0.10) !important;
+        }
+
+        .bg-blue-100 {
+            background-color: rgba(56, 189, 248, 0.14) !important;
+        }
+
+        .bg-green-100 {
+            background-color: rgba(52, 211, 153, 0.14) !important;
+        }
+
+        .bg-yellow-100 {
+            background-color: rgba(251, 191, 36, 0.14) !important;
+        }
+
+        .bg-red-100 {
+            background-color: rgba(248, 113, 113, 0.14) !important;
+        }
+
+        .bg-purple-600,
+        .bg-blue-600 {
+            background-color: #0f766e !important;
+        }
+
+        .bg-purple-700,
+        .bg-blue-700,
+        .hover\:bg-purple-700:hover,
+        .hover\:bg-blue-700:hover {
+            background-color: #115e59 !important;
+        }
+
+        .bg-green-500,
+        .bg-green-600 {
+            background-color: #047857 !important;
+        }
+
+        .bg-green-700,
+        .hover\:bg-green-600:hover,
+        .hover\:bg-green-700:hover {
+            background-color: #065f46 !important;
+        }
+
+        .bg-red-600 {
+            background-color: #dc2626 !important;
+        }
+
+        .bg-red-700,
+        .hover\:bg-red-700:hover {
+            background-color: #b91c1c !important;
+        }
+
+        .bg-yellow-500,
+        .bg-yellow-600 {
+            background-color: #b45309 !important;
+        }
+
+        .text-gray-900,
+        .text-gray-800,
+        .text-gray-700 {
+            color: var(--text) !important;
+        }
+
+        .text-gray-600,
+        .text-gray-500,
+        .text-gray-400 {
+            color: var(--text-muted) !important;
+        }
+
+        .text-purple-600,
+        .text-purple-700,
+        .text-blue-600 {
+            color: var(--accent-blue) !important;
+        }
+
+        .text-purple-900,
+        .hover\:text-purple-900:hover,
+        .hover\:text-purple-500:hover {
+            color: #7dd3fc !important;
+        }
+
+        .text-green-600,
+        .text-green-800 {
+            color: var(--success) !important;
+        }
+
+        .text-yellow-500,
+        .text-yellow-800 {
+            color: var(--warning) !important;
+        }
+
+        .text-red-600,
+        .text-red-700,
+        .text-red-800 {
+            color: var(--danger) !important;
+        }
+
+        .border,
+        .border-t,
+        .border-b,
+        .border-l,
+        .border-r,
+        .border-gray-200,
+        .border-gray-300,
+        .border-gray-400,
+        .border-purple-300 {
+            border-color: var(--border) !important;
+        }
+
+        .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+            border-color: var(--border-soft) !important;
+        }
+
+        .shadow,
+        .shadow-lg,
+        .shadow-xl {
+            box-shadow: var(--shadow) !important;
+        }
+
+        table thead,
+        .bg-gray-50 thead {
+            background-color: var(--surface-strong) !important;
+        }
+
+        tbody.bg-white,
+        .divide-y.bg-white {
+            background-color: var(--surface) !important;
+        }
+
+        tr:hover {
+            background-color: rgba(51, 65, 85, 0.30);
+        }
+
+        input,
+        select,
+        textarea,
+        pre,
+        code {
+            background-color: #0f172a !important;
+            border-color: var(--border) !important;
+            color: var(--text) !important;
+        }
+
+        input::placeholder,
+        textarea::placeholder {
+            color: #728197 !important;
+        }
+
+        input:focus,
+        select:focus,
+        textarea:focus {
+            border-color: var(--accent) !important;
+            box-shadow: 0 0 0 3px rgba(20, 184, 166, 0.20) !important;
+        }
+
+        button.gradient-bg,
+        a.gradient-bg,
+        .gradient-bg[type="submit"] {
+            background:
+                linear-gradient(135deg, var(--accent-strong), #0369a1) !important;
+            box-shadow: 0 10px 26px rgba(3, 105, 161, 0.25);
+        }
+
+        button.gradient-bg:hover,
+        a.gradient-bg:hover,
+        .gradient-bg[type="submit"]:hover {
+            filter: brightness(1.08);
+            opacity: 1 !important;
+        }
+
+        .language-dropdown {
+            background-color: var(--surface-strong) !important;
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+        }
+
+        .language-dropdown button:hover,
+        .hover\:bg-gray-50:hover,
+        .hover\:bg-gray-100:hover,
+        .hover\:bg-gray-300:hover {
+            background-color: var(--surface-muted) !important;
+        }
+
+        .hover\:bg-purple-50:hover {
+            background-color: rgba(20, 184, 166, 0.16) !important;
+        }
+
+        .focus\:ring-purple-500:focus,
+        .focus\:ring-blue-500:focus,
+        .focus\:ring-green-500:focus,
+        .focus\:ring-red-500:focus {
+            --tw-ring-color: rgba(20, 184, 166, 0.35) !important;
+        }
+
+        .focus\:border-purple-500:focus,
+        .focus\:border-blue-500:focus {
+            border-color: var(--accent) !important;
+        }
+
+        #confirmModal {
+            background-color: rgba(2, 6, 23, 0.72) !important;
+            backdrop-filter: blur(6px);
+        }
+
+        #confirmModal > div {
+            background-color: var(--surface) !important;
+            border-color: var(--border) !important;
+        }
+
+        ::selection {
+            background: rgba(20, 184, 166, 0.35);
+        }
     </style>
 </head>
-<body class="bg-gray-50">
+<body class="bg-gray-50 text-gray-100">
     {% if user %}
     <!-- Navigation -->
     <nav class="gradient-bg shadow-lg">

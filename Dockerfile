@@ -14,8 +14,9 @@ RUN apt-get update && apt-get install -y \
     qrencode \
     cron \
     libldap2-dev \
+    dpkg-dev \
     docker.io \
-    && docker-php-ext-configure ldap --with-libdir=lib/x86_64-linux-gnu/ \
+    && docker-php-ext-configure ldap --with-libdir="lib/$(dpkg-architecture --query DEB_BUILD_MULTIARCH)/" \
     && docker-php-ext-install pdo_mysql mbstring exif pcntl bcmath gd ldap \
     && a2enmod rewrite \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
