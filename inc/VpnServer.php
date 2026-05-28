@@ -331,6 +331,10 @@ class VpnServer
 
         $pdo = DB::conn();
         $errors = [];
+        $originalContainerName = $this->data['container_name'] ?? null;
+        if (!empty($options['container_name'])) {
+            $this->data['container_name'] = (string) $options['container_name'];
+        }
 
         try {
             // Update status to deploying
@@ -391,10 +395,16 @@ class VpnServer
             // Reload data
             $this->load();
 
+            $containerName = $this->data['container_name'] ?? $originalContainerName;
+            if ($originalContainerName !== null) {
+                $this->data['container_name'] = $originalContainerName;
+            }
+
             return [
                 'success' => true,
                 'vpn_port' => $vpnPort,
-                'public_key' => $keys['public_key']
+                'public_key' => $keys['public_key'],
+                'container_name' => $containerName
             ];
 
         } catch (Exception $e) {

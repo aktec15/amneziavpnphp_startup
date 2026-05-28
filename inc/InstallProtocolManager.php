@@ -309,6 +309,10 @@ class InstallProtocolManager
         $serverId = $server->getId();
         if ($engine === 'builtin_awg') {
             try {
+                $metadata = $protocol['definition']['metadata'] ?? [];
+                if (empty($options['container_name'])) {
+                    $options['container_name'] = $metadata['container_name'] ?? 'amnezia-awg';
+                }
                 Logger::appendInstall($serverId, 'Installing builtin AWG...');
                 $result = $server->runAwgInstall($options);
                 Logger::appendInstall($serverId, 'Builtin AWG install finished: ' . json_encode($result));
@@ -1536,6 +1540,11 @@ class InstallProtocolManager
             // ── No existing installation found — proceed with fresh install ──
 
             if ($engine === 'builtin_awg') {
+                $metadata = $protocol['definition']['metadata'] ?? [];
+                if (empty($options['container_name'])) {
+                    $options['container_name'] = $metadata['container_name'] ?? 'amnezia-awg';
+                }
+                $primaryDataBeforeInstall = $server->getData();
                 $res = $server->runAwgInstall($options);
                 Logger::appendInstall($serverId, 'Builtin AWG install finished');
 
@@ -1559,7 +1568,7 @@ class InstallProtocolManager
                     }
                 }
 
-                $existingProtocol = $server->getData()['install_protocol'] ?? '';
+                $existingProtocol = $primaryDataBeforeInstall['install_protocol'] ?? '';
                 $currentSlug = $protocol['slug'] ?? '';
                 $isFirstProtocol = ($existingProtocol === '' || $existingProtocol === $currentSlug);
                 if ($isFirstProtocol) {
@@ -1571,7 +1580,33 @@ class InstallProtocolManager
                         'awg_params' => $resolvedAwgParams,
                     ]);
                 } else {
-                    // Secondary protocol — just mark active, don't overwrite primary data
+                    // Secondary protocol — runAwgInstall is legacy and updates vpn_servers itself.
+                    // Restore primary protocol fields so installing AWG alongside XRay does not
+                    // make the panel think the primary service moved to the AWG UDP port.
+                    $pdo = DB::conn();
+                    $stmtRestorePrimary = $pdo->prepare('
+                        UPDATE vpn_servers
+                        SET install_protocol = ?,
+                            vpn_port = ?,
+                            container_name = ?,
+                            server_public_key = ?,
+                            preshared_key = ?,
+                            awg_params = ?,
+                            status = ?,
+                            error_message = NULL
+                        WHERE id = ?
+                    ');
+                    $stmtRestorePrimary->execute([
+                        $primaryDataBeforeInstall['install_protocol'] ?? null,
+                        $primaryDataBeforeInstall['vpn_port'] ?? null,
+                        $primaryDataBeforeInstall['container_name'] ?? null,
+                        $primaryDataBeforeInstall['server_public_key'] ?? null,
+                        $primaryDataBeforeInstall['preshared_key'] ?? null,
+                        $primaryDataBeforeInstall['awg_params'] ?? null,
+                        'active',
+                        $serverId,
+                    ]);
+                    $server->refresh();
                     self::markServerActive($serverId, null, []);
                 }
 
@@ -1596,6 +1631,15 @@ class InstallProtocolManager
             $res = self::runScript($server, $protocol, 'install', $options);
             if (!isset($res['success'])) {
                 $res['success'] = true;
+            }
+            $metadata = $protocol['definition']['metadata'] ?? [];
+            if (
+                (!isset($res['container_name']) || !is_string($res['container_name']) || trim($res['container_name']) === '')
+                && isset($metadata['container_name'])
+                && is_string($metadata['container_name'])
+                && trim($metadata['container_name']) !== ''
+            ) {
+                $res['container_name'] = trim($metadata['container_name']);
             }
             $port = null;
             $password = null;
@@ -1693,6 +1737,9 @@ class InstallProtocolManager
                     'extras' => [
                         'password' => $password,
                         'client_id' => $clientId,
+                        'container_name' => $res['container_name'] ?? null,
+                        'server_public_key' => $res['server_public_key'] ?? null,
+                        'preshared_key' => $res['preshared_key'] ?? null,
                         'result' => $res,
                         'reality_public_key' => $res['reality_public_key'] ?? null,
                         'reality_private_key' => $res['reality_private_key'] ?? null,

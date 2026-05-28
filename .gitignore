@@ -9,7 +9,6 @@ Thumbs.db
 
 # Dependencies
 vendor/
-composer.lock
 node_modules/
 
 # Logs

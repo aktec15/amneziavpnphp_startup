@@ -21,7 +21,7 @@
 }
 .metric-label {
     font-size: 0.75rem;
-    color: #6b7280;
+    color: #a6adbb;
     min-width: 60px;
 }
 .metric-chart {
@@ -32,15 +32,63 @@
 .metric-value {
     font-size: 0.75rem;
     font-weight: 600;
-    color: #111827;
-    min-width: 70px;
+    color: #dbeafe;
+    min-width: 86px;
     text-align: right;
+    background: rgba(59, 130, 246, 0.18);
+    border: 1px solid rgba(96, 165, 250, 0.26);
+    border-radius: 6px;
+    padding: 2px 6px;
+    line-height: 1.25;
+}
+.server-view-shell {
+    max-width: min(1680px, calc(100vw - 32px));
+}
+.clients-table {
+    table-layout: fixed;
+}
+.clients-table th,
+.clients-table td {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+    vertical-align: middle;
+}
+.clients-table .col-name { width: 15%; }
+.clients-table .col-login { width: 12%; }
+.clients-table .col-protocol { width: 10%; }
+.clients-table .col-ip { width: 9%; }
+.clients-table .col-status { width: 9%; }
+.clients-table .col-expiration { width: 8%; }
+.clients-table .col-traffic { width: 10%; }
+.clients-table .col-limit { width: 8%; }
+.clients-table .col-speed { width: 9%; }
+.clients-table .col-handshake { width: 9%; }
+.clients-table .col-actions { width: 9%; }
+.clients-table .truncate-cell {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.clients-table .actions-cell {
+    white-space: normal;
+}
+.clients-table .actions-cell a,
+.clients-table .actions-cell button {
+    display: block;
+    margin-right: 0;
+    text-align: left;
+    line-height: 1.45;
+}
+@media (max-width: 1280px) {
+    .clients-table {
+        min-width: 1180px;
+    }
 }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="max-w-7xl mx-auto px-4 py-8">
+<div class="server-view-shell mx-auto px-4 py-8">
   <div class="mb-6">
     <h1 class="text-3xl font-bold">{{ server.name }}</h1>
     <p class="text-gray-600">{{ server.host }}</p>
@@ -303,36 +351,36 @@
     </div>
     {% if clients|length > 0 %}
     <div class="w-full overflow-x-auto">
-    <table class="w-full" style="min-width: 1120px;">
+    <table class="clients-table w-full">
       <thead class="bg-gray-50">
         <tr>
-          <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('clients.name') }}</th>
-          <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Логин</th>
-          <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('ai.protocol_type') }}</th>
-          <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('clients.ip') }}</th>
-          <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('clients.status') }}</th>
-          <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('clients.expiration') }}</th>
-          <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('clients.traffic') }}</th>
-          <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('clients.traffic_limit') }}</th>
-          <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('common.speed') }}</th>
-          <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('clients.last_handshake') }}</th>
-          <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('clients.actions') }}</th>
+          <th class="col-name py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('clients.name') }}</th>
+          <th class="col-login py-3 text-left text-xs font-medium text-gray-500 uppercase">Логин</th>
+          <th class="col-protocol py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('ai.protocol_type') }}</th>
+          <th class="col-ip py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('clients.ip') }}</th>
+          <th class="col-status py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('clients.status') }}</th>
+          <th class="col-expiration py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('clients.expiration') }}</th>
+          <th class="col-traffic py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('clients.traffic') }}</th>
+          <th class="col-limit py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('clients.traffic_limit') }}</th>
+          <th class="col-speed py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('common.speed') }}</th>
+          <th class="col-handshake py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('clients.last_handshake') }}</th>
+          <th class="col-actions py-3 text-left text-xs font-medium text-gray-500 uppercase">{{ t('clients.actions') }}</th>
         </tr>
       </thead>
       <tbody>
         {% for client in clients %}
         <tr class="border-t">
-          <td class="px-6 py-4">{{ client.name }}</td>
-          <td class="px-6 py-4">{{ client.name }}</td>
-          <td class="px-6 py-4">
+          <td class="py-4 truncate-cell" title="{{ client.name }}">{{ client.name }}</td>
+          <td class="py-4 truncate-cell" title="{{ client.name }}">{{ client.name }}</td>
+          <td class="py-4">
             {% if client.protocol_name %}
-              <span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs">{{ client.protocol_name }}</span>
+              <span class="px-2 py-1 bg-blue-100 text-blue-800 rounded text-xs truncate-cell inline-block max-w-full" title="{{ client.protocol_name }}">{{ client.protocol_name }}</span>
             {% else %}
               <span class="text-gray-400">-</span>
             {% endif %}
           </td>
-          <td class="px-6 py-4">{{ client.client_ip }}</td>
-          <td class="px-6 py-4" data-client-name="{{ client.name }}" data-client-status="{{ client.status }}" data-last-handshake="{{ client.last_handshake }}">
+          <td class="py-4 whitespace-nowrap">{{ client.client_ip }}</td>
+          <td class="py-4" data-client-name="{{ client.name }}" data-client-status="{{ client.status }}" data-last-handshake="{{ client.last_handshake }}">
             {% set is_online_by_handshake = client.last_handshake and (("now"|date('U') - client.last_handshake|date('U')) < 300) %}
             {% if client.name in online_logins or is_online_by_handshake %}
               <span class="online-badge px-2 py-1 bg-green-100 text-green-800 rounded text-xs"><i class="fas fa-wifi mr-1"></i>Online</span>
@@ -342,7 +390,7 @@
               <span class="status-badge px-2 py-1 bg-red-100 text-red-800 rounded text-xs">{{ t('status.disabled') }}</span>
             {% endif %}
           </td>
-          <td class="px-6 py-4 text-sm">
+          <td class="py-4 text-sm">
             {% if client.expires_at %}
               {% set expires_ts = client.expires_at|date('U') %}
               {% set now_ts = "now"|date('U') %}
@@ -363,7 +411,7 @@
               <span class="text-green-500 text-xl" title="{{ t('clients.never_expires') }}">&infin;</span>
             {% endif %}
           </td>
-          <td class="px-2 py-2 text-xs">
+          <td class="py-2 text-xs">
             <div class="text-gray-600 font-mono">
               ↑{{ (client.bytes_sent|default(0) / 1024 / 1024)|number_format(2) }} MB
             </div>
@@ -371,7 +419,7 @@
               ↓{{ (client.bytes_received|default(0) / 1024 / 1024)|number_format(2) }} MB
             </div>
           </td>
-          <td class="px-2 py-2 text-xs text-center">
+          <td class="py-2 text-xs text-center">
             {% if client.traffic_limit %}
               {% set total_traffic = (client.bytes_sent|default(0) + client.bytes_received|default(0)) %}
               {% set limit_gb = (client.traffic_limit / 1073741824)|number_format(2) %}
@@ -393,8 +441,8 @@
               <span class="text-green-500 text-lg" title="{{ t('clients.unlimited') }}">&infin;</span>
             {% endif %}
           </td>
-          <td class="px-2 py-2 text-xs">
-            <div class="flex flex-col items-center" style="width: 120px; max-width: 120px;">
+          <td class="py-2 text-xs">
+            <div class="flex flex-col items-center" style="width: 108px; max-width: 108px;">
               <div style="height: 30px; width: 100%;">
                 <canvas id="clientSparkline-{{ client.id }}"></canvas>
               </div>
@@ -404,7 +452,7 @@
               </div>
             </div>
           </td>
-          <td class="px-2 py-2 text-xs whitespace-nowrap text-right">
+          <td class="py-2 text-xs whitespace-nowrap text-right">
             {% if client.last_handshake %}
               <span class="text-gray-600 block">{{ client.last_handshake|split(' ')|first }}</span>
               <span class="text-gray-400 block">{{ client.last_handshake|split(' ')|last }}</span>
@@ -412,15 +460,15 @@
               <span class="text-gray-400">{{ t('clients.never') }}</span>
             {% endif %}
           </td>
-          <td class="px-6 py-4">
-            <a href="/clients/{{ client.id }}" class="text-purple-600 hover:text-purple-800 mr-2">{{ t('servers.view') }}</a>
+          <td class="py-4 actions-cell">
+            <a href="/clients/{{ client.id }}" class="text-purple-600 hover:text-purple-800">{{ t('servers.view') }}</a>
             {% if client.status == 'active' %}
               <form method="POST" action="/clients/{{ client.id }}/revoke" style="display:inline;">
-                <button type="button" class="text-orange-600 hover:text-orange-800 mr-2" onclick="confirmAction(this, '{{ t('clients.revoke_confirm') }}')">{{ t('clients.revoke') }}</button>
+                <button type="button" class="text-orange-600 hover:text-orange-800" onclick="confirmAction(this, '{{ t('clients.revoke_confirm') }}')">{{ t('clients.revoke') }}</button>
               </form>
             {% else %}
               <form method="POST" action="/clients/{{ client.id }}/restore" style="display:inline;">
-                <button type="submit" class="text-green-600 hover:text-green-800 mr-2">{{ t('clients.restore') }}</button>
+                <button type="submit" class="text-green-600 hover:text-green-800">{{ t('clients.restore') }}</button>
               </form>
             {% endif %}
             <form method="POST" action="/clients/{{ client.id }}/delete" style="display:inline;">

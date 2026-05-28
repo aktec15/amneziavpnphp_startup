@@ -8,18 +8,26 @@
     gap: 12px;
     font-size: 0.75rem;
     margin-top: 4px;
+    flex-wrap: wrap;
 }
 .metric-badge {
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 2px 6px;
-    background: #f3f4f6;
-    border-radius: 4px;
+    min-width: 78px;
+    padding: 3px 7px;
+    background: rgba(59, 130, 246, 0.14);
+    border: 1px solid rgba(96, 165, 250, 0.22);
+    border-radius: 6px;
     white-space: nowrap;
 }
 .metric-badge i {
     font-size: 10px;
+}
+.metric-val {
+    color: #dbeafe;
+    font-weight: 700;
+    line-height: 1.2;
 }
 .metric-sparkline {
     height: 20px;
@@ -75,19 +83,35 @@
             <div class="server-metrics" id="metrics-{{ server.id }}">
               <div class="metric-badge">
                 <i class="fas fa-microchip" style="color:#dc3545"></i>
-                <span class="metric-val" data-metric="cpu">--</span>
+                <span class="metric-val" data-metric="cpu">
+                  {% if server.latest_metrics.cpu_percent is defined and server.latest_metrics.cpu_percent is not null %}
+                    {{ server.latest_metrics.cpu_percent|number_format(1) }}%
+                  {% else %}--{% endif %}
+                </span>
               </div>
               <div class="metric-badge">
                 <i class="fas fa-memory" style="color:#ffc107"></i>
-                <span class="metric-val" data-metric="ram">--</span>
+                <span class="metric-val" data-metric="ram">
+                  {% if server.latest_metrics.ram_used_mb is defined and server.latest_metrics.ram_total_mb %}
+                    {{ ((server.latest_metrics.ram_used_mb / server.latest_metrics.ram_total_mb) * 100)|round }}%
+                  {% else %}--{% endif %}
+                </span>
               </div>
               <div class="metric-badge">
                 <i class="fas fa-hdd" style="color:#17a2b8"></i>
-                <span class="metric-val" data-metric="disk">--</span>
+                <span class="metric-val" data-metric="disk">
+                  {% if server.latest_metrics.disk_used_gb is defined and server.latest_metrics.disk_total_gb %}
+                    {{ ((server.latest_metrics.disk_used_gb / server.latest_metrics.disk_total_gb) * 100)|round }}%
+                  {% else %}--{% endif %}
+                </span>
               </div>
               <div class="metric-badge">
                 <i class="fas fa-network-wired" style="color:#28a745"></i>
-                <span class="metric-val" data-metric="network">--</span>
+                <span class="metric-val" data-metric="network">
+                  {% if server.latest_metrics.network_rx_mbps is defined and server.latest_metrics.network_tx_mbps is defined %}
+                    ↓{{ server.latest_metrics.network_rx_mbps|number_format(1) }} ↑{{ server.latest_metrics.network_tx_mbps|number_format(1) }}
+                  {% else %}--{% endif %}
+                </span>
               </div>
             </div>
             {% else %}

@@ -799,7 +799,9 @@ class VpnClient
         $containerName = $serverData['container_name'];
         $protocolSlug = (string) ($serverData['install_protocol'] ?? '');
         $isAwg2 = (stripos($containerName, 'awg2') !== false || $protocolSlug === 'awg2');
-        $wgTool = $isAwg2 ? 'awg' : 'wg';
+        // The AWG2 userspace image exposes WireGuard-compatible `wg` for key
+        // generation; it does not ship an `awg` binary.
+        $wgTool = 'wg';
 
         $cmd = sprintf(
             "docker exec -i %s sh -lc 'set -e; umask 077; priv=\$(%s genkey | tr -d " . '"' . "\\r\\n" . '"' . "); [ -n \"\$priv\" ] || { echo empty_private_key; exit 1; }; pub=\$(printf " . '"' . "%%s\\n" . '"' . " \"\$priv\" | %s pubkey | tr -d " . '"' . "\\r\\n" . '"' . "); [ -n \"\$pub\" ] || { echo empty_public_key; exit 1; }; printf " . '"' . "%%s\\n---\\n%%s\\n" . '"' . " \"\$priv\" \"\$pub\"'",
@@ -808,17 +810,8 @@ class VpnClient
             $wgTool
         );
 
-        $escaped = escapeshellarg($cmd);
-        $sshCmd = sprintf(
-            "sshpass -p %s ssh -p %d -q -o LogLevel=ERROR -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o PreferredAuthentications=password -o PubkeyAuthentication=no %s@%s %s 2>&1",
-            escapeshellarg($serverData['password']),
-            $serverData['port'],
-            $serverData['username'],
-            $serverData['host'],
-            $escaped
-        );
-
-        $out = (string) shell_exec($sshCmd);
+        $server = new VpnServer((int) $serverData['id']);
+        $out = (string) $server->executeCommand($cmd, true);
         $parts = explode("---", trim($out));
 
         if (count($parts) < 2) {
@@ -904,17 +897,10 @@ class VpnClient
                 'JMAX' => 50,
                 'S1' => 51,
                 'S2' => 125,
-                'S3' => 13,
-                'S4' => 9,
                 'H1' => '1443912531-1981073285',
                 'H2' => '1984025557-2135018048',
                 'H3' => '2145217268-2146643749',
                 'H4' => '2146790761-2146860793',
-                'I1' => '<r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>',
-                'I2' => '',
-                'I3' => '',
-                'I4' => '',
-                'I5' => '',
             ];
         }
 
@@ -1066,7 +1052,7 @@ class VpnClient
                 // For H1-H4 parameters, expect format like "1443912531-1981073285" (two values with dash)
                 // For other parameters, expect single integer value
                 if (in_array($param, ['h1', 'h2', 'h3', 'h4'], true)) {
-                    if (preg_match('/^\s*' . preg_quote($param, '/') . ':\s*(\d+-\d+)/mi', $wgOutput, $matches)) {
+                    if (preg_match('/^\s*' . preg_quote($param, '/') . ':\s*(\d+(?:-\d+)?)/mi', $wgOutput, $matches)) {
                         $awgParams[strtoupper($param)] = $matches[1];
                     }
                 } else {
@@ -1093,13 +1079,60 @@ class VpnClient
 
                 $awgParamsJson = !empty($awgParams) ? json_encode($awgParams) : null;
 
-                // Update vpn_servers with all extracted values including DNS
-                if (!empty($psk)) {
-                    $stmt = $pdo->prepare('UPDATE vpn_servers SET server_public_key = ?, preshared_key = ?, vpn_port = ?, awg_params = ?, dns_servers = ? WHERE id = ?');
-                    $stmt->execute([$pubKey, $psk, (int) $port, $awgParamsJson, $dns, $serverData['id']]);
+                $stmtPrimary = $pdo->prepare('SELECT install_protocol FROM vpn_servers WHERE id = ?');
+                $stmtPrimary->execute([$serverData['id']]);
+                $primaryProtocol = (string) ($stmtPrimary->fetchColumn() ?: '');
+                $isPrimaryProtocol = ($protocolSlug === '' || $primaryProtocol === '' || $primaryProtocol === $protocolSlug);
+
+                if ($isPrimaryProtocol) {
+                    // Update vpn_servers with all extracted values including DNS
+                    if (!empty($psk)) {
+                        $stmt = $pdo->prepare('UPDATE vpn_servers SET server_public_key = ?, preshared_key = ?, vpn_port = ?, awg_params = ?, dns_servers = ? WHERE id = ?');
+                        $stmt->execute([$pubKey, $psk, (int) $port, $awgParamsJson, $dns, $serverData['id']]);
+                    } else {
+                        $stmt = $pdo->prepare('UPDATE vpn_servers SET server_public_key = ?, vpn_port = ?, awg_params = ?, dns_servers = ? WHERE id = ?');
+                        $stmt->execute([$pubKey, (int) $port, $awgParamsJson, $dns, $serverData['id']]);
+                    }
                 } else {
-                    $stmt = $pdo->prepare('UPDATE vpn_servers SET server_public_key = ?, vpn_port = ?, awg_params = ?, dns_servers = ? WHERE id = ?');
-                    $stmt->execute([$pubKey, (int) $port, $awgParamsJson, $dns, $serverData['id']]);
+                    // Multi-protocol server: keep the primary row (for example XRay on
+                    // 443) intact and refresh only this protocol's own metadata.
+                    $stmtPid = $pdo->prepare('SELECT id FROM protocols WHERE slug = ? LIMIT 1');
+                    $stmtPid->execute([$protocolSlug]);
+                    $protocolId = (int) $stmtPid->fetchColumn();
+                    if ($protocolId > 0) {
+                        $extras = [
+                            'success' => true,
+                            'vpn_port' => (int) $port,
+                            'server_public_key' => $pubKey,
+                            'public_key' => $pubKey,
+                            'preshared_key' => $psk,
+                            'awg_params' => $awgParams,
+                            'dns_servers' => $dns,
+                            'container_name' => $containerName,
+                            'result' => [
+                                'success' => true,
+                                'vpn_port' => (int) $port,
+                                'server_port' => (int) $port,
+                                'server_public_key' => $pubKey,
+                                'public_key' => $pubKey,
+                                'preshared_key' => $psk,
+                                'awg_params' => $awgParams,
+                                'dns_servers' => $dns,
+                                'container_name' => $containerName,
+                            ],
+                        ];
+                        $config = [
+                            'server_host' => $serverData['host'] ?? null,
+                            'server_port' => (int) $port,
+                            'extras' => $extras,
+                        ];
+                        $stmtSp = $pdo->prepare('
+                            INSERT INTO server_protocols (server_id, protocol_id, config_data, applied_at, created_at)
+                            VALUES (?, ?, ?, NOW(), NOW())
+                            ON DUPLICATE KEY UPDATE config_data = VALUES(config_data), applied_at = NOW()
+                        ');
+                        $stmtSp->execute([$serverData['id'], $protocolId, json_encode($config)]);
+                    }
                 }
 
                 error_log("Auto-synced server keys from container $containerName: port=$port, dns=$dns, awg_params=" . ($awgParamsJson ?? 'none'));
@@ -1213,9 +1246,10 @@ class VpnClient
             throw new Exception('Refusing to add client with empty public key');
         }
 
-        // Determine correct tool names (awg for AWG2, wg for standard)
-        $wgTool = $isAwg2 ? 'awg' : 'wg';
-        $wgQuickTool = $isAwg2 ? 'awg-quick' : 'wg-quick';
+        // The current AWG2 image runs an AWG userspace backend, but exposes the
+        // control tools as `wg`/`wg-quick` inside the container.
+        $wgTool = 'wg';
+        $wgQuickTool = 'wg-quick';
 
         // 1. Create temp file for PSK (to avoid shell escaping issues)
         $pskFile = '/tmp/' . bin2hex(random_bytes(8)) . '.psk';
@@ -1551,7 +1585,7 @@ class VpnClient
             $configFile = 'wg0.conf';
         }
         $ifaceName = str_replace('.conf', '', $configFile);
-        $wgTool = $isAwg2 ? 'awg' : 'wg';
+        $wgTool = 'wg';
 
         // First, remove using wg/awg command (live removal)
         $removeCmd = sprintf(
@@ -1585,7 +1619,7 @@ class VpnClient
         self::executeServerCommand($serverData, $writeCmd, true);
 
         // Save config
-        $wgQuickTool = $isAwg2 ? 'awg-quick' : 'wg-quick';
+        $wgQuickTool = 'wg-quick';
         $saveCmd = sprintf("docker exec -i %s %s save %s", $containerName, $wgQuickTool, $ifaceName);
         self::executeServerCommand($serverData, $saveCmd, true);
 
@@ -2635,5 +2669,3 @@ class VpnClient
         return $disabled;
     }
 }
-
-

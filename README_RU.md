@@ -41,13 +41,12 @@
 ## Установка
 
 ```bash
-git clone https://github.com/infosave2007/amneziavpnphp.git
-cd amneziavpnphp
+git clone https://github.com/aktec15/amneziavpnphp_startup.git
+cd amneziavpnphp_startup
 cp .env.example .env
 
 # Для Docker Compose V2 (рекомендуется)
 docker compose up -d
-docker compose exec web composer install
 
 # Дождитесь готовности БД (начальные SQL-файлы миграции применяются автоматически через MySQL entrypoint)
 until [ "$(docker inspect -f '{{.State.Health.Status}}' amnezia-panel-db 2>/dev/null)" = "healthy" ]; do
@@ -56,7 +55,6 @@ done
 
 # Или для старой Docker Compose V1
 docker-compose up -d
-docker-compose exec web composer install
 
 until [ "$(docker inspect -f '{{.State.Health.Status}}' amnezia-panel-db 2>/dev/null)" = "healthy" ]; do
   sleep 2
@@ -76,7 +74,11 @@ done
 
 Доступ: http://localhost:8082
 
-Данные для входа по умолчанию: admin@amnez.ia / admin123
+Данные для входа по умолчанию: admin@amnez.ia / admin123.
+Их можно поменять перед первым запуском через `ADMIN_EMAIL` и `ADMIN_PASSWORD` в `.env`.
+
+> Перед публичным запуском обязательно поменяйте `ADMIN_PASSWORD`,
+> `DB_PASSWORD`, `DB_ROOT_PASSWORD` и `JWT_SECRET` в `.env`.
 
 ### Предварительные требования для удаленного сервера
 
@@ -105,12 +107,12 @@ DB_HOST=db
 DB_PORT=3306
 DB_DATABASE=amnezia_panel
 DB_USERNAME=amnezia
-DB_PASSWORD=amnezia
+DB_PASSWORD=change_me_database_password
 
 ADMIN_EMAIL=admin@amnez.ia
 ADMIN_PASSWORD=admin123
 
-JWT_SECRET=your-secret-key-change-this
+JWT_SECRET=generate_a_long_random_secret
 ```
 
 ## Использование
@@ -288,7 +290,7 @@ docker compose exec web php /var/www/html/bin/check_traffic_limits.php
 Получить JWT-токен:
 ```bash
 curl -X POST http://localhost:8082/api/auth/token \
-  -d "email=admin@amnez.ia&password=admin123"
+  -d "email=admin@amnez.ia&password=<your_admin_password>"
 ```
 
 Использовать токен:

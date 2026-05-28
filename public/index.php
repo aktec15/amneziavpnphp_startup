@@ -262,6 +262,153 @@ Router::get('/dashboard', function () {
     // Get user's servers
     $servers = VpnServer::listByUser($user['id']);
 
+    // Refresh WireGuard/AWG handshakes before rendering the online counter.
+    // XRay has its own API path below; WG/AWG exposes online state via
+    // `wg show all dump` inside each protocol container.
+    try {
+        $pdo = DB::conn();
+        foreach ($servers as $serverRow) {
+            $serverId = (int) ($serverRow['id'] ?? 0);
+            if ($serverId <= 0) {
+                continue;
+            }
+
+            $serverModel = new VpnServer($serverId);
+
+            $xrayContainer = trim((string) ($serverRow['container_name'] ?? ''));
+            if ($xrayContainer === '' || stripos($xrayContainer, 'xray') === false) {
+                $xrayContainer = 'amnezia-xray';
+            }
+            $xrayCmd = 'docker exec ' . escapeshellarg($xrayContainer)
+                . ' xray api statsquery --pattern ' . escapeshellarg('user>>>')
+                . ' --server=127.0.0.1:10085 2>/dev/null || true';
+            $xrayRaw = (string) $serverModel->executeCommand($xrayCmd, true);
+            $xrayDecoded = json_decode(trim($xrayRaw), true);
+            if (is_array($xrayDecoded) && isset($xrayDecoded['stat']) && is_array($xrayDecoded['stat'])) {
+                $xrayUsers = [];
+                foreach ($xrayDecoded['stat'] as $stat) {
+                    $name = (string) ($stat['name'] ?? '');
+                    $value = (int) ($stat['value'] ?? 0);
+                    if ($value <= 0 || !preg_match('/^user>>>(.+?)>>>traffic>>>(uplink|downlink)$/u', $name, $m)) {
+                        continue;
+                    }
+
+                    $login = (string) $m[1];
+                    $direction = (string) $m[2];
+                    if (!isset($xrayUsers[$login])) {
+                        $xrayUsers[$login] = ['uplink' => 0, 'downlink' => 0];
+                    }
+                    $xrayUsers[$login][$direction] += $value;
+                }
+
+                foreach ($xrayUsers as $login => $traffic) {
+                    $stmtClient = $pdo->prepare('
+                        SELECT id, bytes_sent, bytes_received
+                        FROM vpn_clients
+                        WHERE server_id = ?
+                          AND status = \'active\'
+                          AND name = ?
+                        LIMIT 1
+                    ');
+                    $stmtClient->execute([$serverId, $login]);
+                    $clientRow = $stmtClient->fetch(PDO::FETCH_ASSOC);
+                    if (!$clientRow) {
+                        continue;
+                    }
+
+                    $sent = (int) $traffic['uplink'];
+                    $received = (int) $traffic['downlink'];
+                    $hadIncrease = $sent > (int) ($clientRow['bytes_sent'] ?? 0)
+                        || $received > (int) ($clientRow['bytes_received'] ?? 0);
+
+                    $stmtUpdateXray = $pdo->prepare('
+                        UPDATE vpn_clients
+                        SET bytes_sent = ?,
+                            bytes_received = ?,
+                            last_handshake = CASE WHEN ? THEN NOW() ELSE last_handshake END
+                        WHERE id = ?
+                    ');
+                    $stmtUpdateXray->execute([
+                        $sent,
+                        $received,
+                        $hadIncrease ? 1 : 0,
+                        (int) $clientRow['id'],
+                    ]);
+                }
+            }
+
+            $stmtProto = $pdo->prepare("
+                SELECT sp.protocol_id, p.slug, sp.config_data
+                FROM server_protocols sp
+                JOIN protocols p ON p.id = sp.protocol_id
+                WHERE sp.server_id = ?
+                  AND (p.slug LIKE '%wg%' OR p.slug LIKE '%wireguard%' OR p.slug = 'awg2')
+            ");
+            $stmtProto->execute([$serverId]);
+            $protocolRows = $stmtProto->fetchAll(PDO::FETCH_ASSOC);
+            if (!$protocolRows) {
+                continue;
+            }
+
+            foreach ($protocolRows as $protocolRow) {
+                $config = json_decode((string) ($protocolRow['config_data'] ?? ''), true);
+                if (!is_array($config)) {
+                    $config = [];
+                }
+                $extras = $config['extras'] ?? [];
+                if (isset($extras['result']) && is_array($extras['result'])) {
+                    $extras = array_merge($extras, $extras['result']);
+                }
+
+                $containerName = trim((string) ($extras['container_name'] ?? ''));
+                if ($containerName === '') {
+                    $containerName = ($protocolRow['slug'] ?? '') === 'awg2' ? 'amnezia-awg2' : 'amnezia-awg';
+                }
+
+                $dumpCmd = 'docker exec ' . escapeshellarg($containerName) . ' wg show all dump 2>/dev/null || true';
+                $dump = (string) $serverModel->executeCommand($dumpCmd, true);
+                if (trim($dump) === '') {
+                    continue;
+                }
+
+                foreach (preg_split('/\r?\n/', trim($dump)) as $line) {
+                    $parts = explode("\t", $line);
+                    if (count($parts) < 8) {
+                        continue;
+                    }
+
+                    $publicKey = trim((string) $parts[1]);
+                    $handshakeTs = (int) $parts[5];
+                    if ($publicKey === '' || $handshakeTs <= 0) {
+                        continue;
+                    }
+
+                    $rxBytes = (int) $parts[6];
+                    $txBytes = (int) $parts[7];
+                    $stmtUpdate = $pdo->prepare("
+                        UPDATE vpn_clients
+                        SET last_handshake = ?,
+                            bytes_sent = ?,
+                            bytes_received = ?
+                        WHERE server_id = ?
+                          AND protocol_id = ?
+                          AND public_key = ?
+                    ");
+                    $stmtUpdate->execute([
+                        date('Y-m-d H:i:s', $handshakeTs),
+                        $rxBytes,
+                        $txBytes,
+                        $serverId,
+                        (int) $protocolRow['protocol_id'],
+                        $publicKey,
+                    ]);
+                }
+            }
+        }
+    } catch (Throwable $e) {
+        error_log('Dashboard WG online sync failed: ' . $e->getMessage());
+    }
+
     // Get user's clients
     $clients = VpnClient::listByUser($user['id']);
 
@@ -302,6 +449,40 @@ Router::get('/servers', function () {
     $servers = Auth::isAdmin()
         ? VpnServer::listAll()
         : VpnServer::listByUser($user['id']);
+
+    $pdo = DB::conn();
+    foreach ($servers as &$serverRow) {
+        $serverId = (int) ($serverRow['id'] ?? 0);
+        if ($serverId <= 0 || ($serverRow['status'] ?? '') !== 'active') {
+            continue;
+        }
+
+        $stmtMetric = $pdo->prepare('
+            SELECT cpu_percent, ram_used_mb, ram_total_mb, disk_used_gb, disk_total_gb,
+                   network_rx_mbps, network_tx_mbps, collected_at
+            FROM server_metrics
+            WHERE server_id = ?
+            ORDER BY collected_at DESC
+            LIMIT 1
+        ');
+        $stmtMetric->execute([$serverId]);
+        $metric = $stmtMetric->fetch(PDO::FETCH_ASSOC);
+
+        $metricTs = $metric && isset($metric['collected_at']) ? strtotime((string) $metric['collected_at']) : null;
+        if (!$metric || !$metricTs || (time() - $metricTs) > 60) {
+            try {
+                $monitor = new ServerMonitoring($serverId);
+                $monitor->collectMetrics();
+                $stmtMetric->execute([$serverId]);
+                $metric = $stmtMetric->fetch(PDO::FETCH_ASSOC);
+            } catch (Throwable $e) {
+                error_log('Servers list metric refresh failed: ' . $e->getMessage());
+            }
+        }
+
+        $serverRow['latest_metrics'] = $metric ?: null;
+    }
+    unset($serverRow);
 
     View::render('servers/index.twig', ['servers' => $servers]);
 });
@@ -1224,8 +1405,8 @@ Router::get('/clients/{id}', function ($params) {
                 $slug = $protocol['slug'] ?? '';
                 $isWireguard = in_array($slug, ['amnezia-wg-advanced', 'wireguard-standard', 'amnezia-wg', 'awg2'], true);
                 if ($isWireguard) {
-                    // For WG, we don't render protocol_output; config is downloadable
-                    $protocolOutput = '';
+                    // Show WireGuard/AWG config text when the protocol allows text content.
+                    $protocolOutput = !empty($protocol['show_text_content']) ? ($clientData['config'] ?? '') : '';
                 } else {
                     // For non-WG protocols, reuse stored generated output in config
                     $protocolOutput = $clientData['config'] ?? '';
@@ -2452,6 +2633,24 @@ Router::get('/api/servers/{id}/metrics', function ($params) {
         }
 
         $metrics = ServerMonitoring::getServerMetrics($serverId, $hours);
+
+        $latestCollectedAt = null;
+        if (!empty($metrics)) {
+            $latest = end($metrics);
+            $latestCollectedAt = isset($latest['collected_at']) ? strtotime((string) $latest['collected_at']) : null;
+            reset($metrics);
+        }
+
+        // The UI polls this endpoint directly. If the background metrics cron is
+        // missing or stale, collect one fresh sample now so server pages do not
+        // sit forever on "--".
+        if (empty($metrics) || !$latestCollectedAt || (time() - $latestCollectedAt) > 60) {
+            $monitor = new ServerMonitoring($serverId);
+            $freshMetric = $monitor->collectMetrics();
+            if (!empty($freshMetric)) {
+                $metrics = ServerMonitoring::getServerMetrics($serverId, $hours);
+            }
+        }
 
         echo json_encode(['success' => true, 'metrics' => $metrics]);
     } catch (Exception $e) {
