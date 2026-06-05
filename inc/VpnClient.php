@@ -308,7 +308,7 @@ class VpnClient
                     $vars['container_name'] = $vars['containername'];
                 }
             }
-            if ($slug === 'xray-vless') {
+            if (self::isXrayProtocolSlug($slug)) {
                 if (empty($vars['server_port'])) {
                     if (is_array($extras) && isset($extras['result']) && is_array($extras['result'])) {
                         $res = $extras['result'];
@@ -1415,6 +1415,11 @@ class VpnClient
             error_log('Failed to generate QR code: ' . $e->getMessage());
             return ''; // QR code generation failed, but continue
         }
+    }
+
+    private static function isXrayProtocolSlug(string $slug): bool
+    {
+        return stripos($slug, 'xray') !== false || stripos($slug, 'vless') !== false;
     }
 
     /**

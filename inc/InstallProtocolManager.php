@@ -334,8 +334,8 @@ class InstallProtocolManager
             Logger::appendInstall($serverId, 'Running scripted install...');
             $metadata = $protocol['definition']['metadata'] ?? [];
             // Choose/ensure VPN UDP port for script-driven installs
-            if (($protocol['slug'] ?? '') === 'xray-vless' && (!isset($options['server_port']) || !is_int($options['server_port']) || $options['server_port'] <= 0)) {
-                $options['server_port'] = 443;
+            if (self::isXrayProtocol($protocol) && (!isset($options['server_port']) || !is_int($options['server_port']) || $options['server_port'] <= 0)) {
+                $options['server_port'] = (int) ($metadata['default_port'] ?? 443);
             }
             if (!isset($options['server_port']) || !is_int($options['server_port'])) {
                 $options['server_port'] = self::chooseServerPort($server, $metadata);
@@ -376,7 +376,7 @@ class InstallProtocolManager
             if (($protocol['slug'] ?? '') === 'aivpn' && array_key_exists('connection_key', $result)) {
                 $extras['connection_key'] = $result['connection_key'];
             }
-            if (($protocol['slug'] ?? '') === 'xray-vless') {
+            if (self::isXrayProtocol($protocol)) {
                 foreach (['client_id', 'container_name', 'server_port', 'xray_port', 'reality_public_key', 'reality_private_key', 'reality_short_id', 'reality_server_name'] as $k) {
                     if (array_key_exists($k, $result)) {
                         $extras[$k] = $result[$k];
@@ -796,7 +796,7 @@ class InstallProtocolManager
                 $scripts = $protocol['install_script'] ?? null;
             } elseif ($phase === 'uninstall') {
                 $scripts = $protocol['uninstall_script'] ?? null;
-            } elseif ($phase === 'add_client' && ($protocol['slug'] ?? '') === 'xray-vless') {
+            } elseif ($phase === 'add_client' && self::isXrayProtocol($protocol)) {
                 return self::runBuiltinXrayAddClient($server, $options);
             }
         }
@@ -890,6 +890,7 @@ class InstallProtocolManager
                 'host key verification failed',
                 'timed out',
                 'operation timed out',
+                'failed to',
             ];
             foreach ($hardErrors as $needle) {
                 if ($needle !== '' && strpos($lower, $needle) !== false) {
@@ -1169,7 +1170,7 @@ class InstallProtocolManager
 
         for ($attempt = 0; $attempt < 30; $attempt++) {
             $candidate = random_int($min, $max);
-            $cmd = "ss -lun | awk '{print $4}' | grep -E ':(" . $candidate . ")($| )' || true";
+            $cmd = "ss -lntu | awk '{print $4}' | grep -E ':(" . $candidate . ")($| )' || true";
             $out = $server->executeCommand($cmd, false);
             if (trim($out) === '') {
                 return $candidate;
@@ -1265,6 +1266,7 @@ class InstallProtocolManager
             'cloudflare-warp'       => 'warp',
             // X-Ray
             'xray-vless'            => 'xray',
+            'xray-reality-advanced' => 'xray',
             // AWG variants
             'amnezia-wg'            => 'awg',
             'amnezia-wg-advanced'   => 'awg',
@@ -1327,6 +1329,16 @@ class InstallProtocolManager
                 'is_active' => 1,
             ]
         ];
+    }
+
+    private static function isXrayProtocol(array $protocol): bool
+    {
+        $slug = (string) ($protocol['slug'] ?? '');
+        if ($slug === '') {
+            return false;
+        }
+
+        return stripos($slug, 'xray') !== false || stripos($slug, 'vless') !== false;
     }
 
     private static function storeDecision(int $serverId, array $payload): string
@@ -1653,7 +1665,7 @@ class InstallProtocolManager
             if (isset($res['client_id']) && is_string($res['client_id'])) {
                 $clientId = $res['client_id'];
             }
-            if (is_string($res['output'] ?? '')) {
+            if (is_string($res['output'] ?? null)) {
                 $out = $res['output'];
                 if (preg_match('/Port:\s*(\d+)/i', $out, $m)) {
                     $port = (int) $m[1];
@@ -1665,7 +1677,7 @@ class InstallProtocolManager
                     $clientId = $m[1];
                 }
             }
-            if (($protocol['slug'] ?? '') === 'xray-vless' && $clientId === null) {
+            if (self::isXrayProtocol($protocol) && $clientId === null) {
                 $containerName = 'amnezia-xray';
                 if (isset($res['container_name']) && is_string($res['container_name']) && trim($res['container_name']) !== '') {
                     $containerName = trim($res['container_name']);
@@ -2069,13 +2081,26 @@ class InstallProtocolManager
 
         Logger::appendInstall($server->getId(), "Adding X-Ray client $clientId to container $containerName");
 
-        // 1. Read config
-        $catCmd = "docker exec -i " . escapeshellarg($containerName) . " cat /opt/amnezia/xray/server.json 2>/dev/null";
-        $configRaw = $server->executeCommand($catCmd, true);
+        // 1. Read config. Different X-Ray profiles may use different config dirs.
+        $configRaw = '';
+        $configPath = '';
+        $candidatePaths = [];
+        if (!empty($options['config_dir']) && is_string($options['config_dir'])) {
+            $candidatePaths[] = rtrim($options['config_dir'], '/') . '/server.json';
+        }
+        $candidatePaths = array_values(array_unique(array_merge($candidatePaths, [
+            '/opt/amnezia/xray/server.json',
+            '/opt/amnezia/xray-reality-advanced/server.json',
+            '/etc/xray/config.json',
+        ])));
 
-        if (trim($configRaw) === '') {
-            $catCmd = "docker exec -i " . escapeshellarg($containerName) . " cat /etc/xray/config.json 2>/dev/null";
+        foreach ($candidatePaths as $path) {
+            $catCmd = "docker exec -i " . escapeshellarg($containerName) . " cat " . escapeshellarg($path) . " 2>/dev/null";
             $configRaw = $server->executeCommand($catCmd, true);
+            if (trim($configRaw) !== '') {
+                $configPath = $path;
+                break;
+            }
         }
 
         if (trim($configRaw) === '') {
@@ -2248,7 +2273,9 @@ class InstallProtocolManager
         // 3. Write config back
         $newJson = json_encode($config, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         $b64 = base64_encode($newJson);
-        $writeCmd = "docker exec -i " . escapeshellarg($containerName) . " sh -c 'echo \"$b64\" | base64 -d > /opt/amnezia/xray/server.json'";
+        $writeCmd = "printf %s " . escapeshellarg($b64)
+            . " | docker exec -i " . escapeshellarg($containerName)
+            . " sh -c " . escapeshellarg('base64 -d > ' . escapeshellarg($configPath));
 
         $server->executeCommand($writeCmd, true);
 
