@@ -1941,12 +1941,17 @@ class VpnClient
         // Command to query stats
         // We query by email, which should be equal to client ID (UUID)
         $cmd = sprintf(
-            "docker exec -i %s xray api statsquery --server=127.0.0.1:10085 --pattern 'user>>>%s>>>traffic>>>' 2>/dev/null",
+            "docker exec -i %s xray api statsquery --server=127.0.0.1:10085 --pattern 'user>>>%s>>>traffic' 2>/dev/null",
             escapeshellarg($containerName),
             escapeshellarg($clientId)
         );
 
-        $output = self::executeServerCommand($serverData, $cmd, true);
+        $serverId = (int) ($serverData['id'] ?? 0);
+        if ($serverId <= 0) {
+            return $stats;
+        }
+
+        $output = (new VpnServer($serverId))->executeCommand($cmd, true);
 
         if (empty($output)) {
             return $stats;
@@ -2003,7 +2008,14 @@ class VpnClient
         try {
             // Get previous stats for speed calculation
             $pdo = DB::conn();
-            $stmtPrev = $pdo->prepare('SELECT bytes_sent, bytes_received, last_sync_at, last_handshake, aivpn_raw_bytes_in, aivpn_raw_bytes_out, aivpn_offset_bytes_in, aivpn_offset_bytes_out FROM vpn_clients WHERE id = ?');
+            $stmtPrev = $pdo->prepare('
+                SELECT bytes_sent, bytes_received, last_sync_at, last_handshake,
+                       aivpn_raw_bytes_in, aivpn_raw_bytes_out,
+                       aivpn_offset_bytes_in, aivpn_offset_bytes_out,
+                       xray_raw_bytes_sent, xray_raw_bytes_received,
+                       xray_offset_bytes_sent, xray_offset_bytes_received
+                FROM vpn_clients WHERE id = ?
+            ');
             $stmtPrev->execute([$this->clientId]);
             $prev = $stmtPrev->fetch();
 
@@ -2015,6 +2027,10 @@ class VpnClient
             $aivpnRawOutPrev = (int) ($prev['aivpn_raw_bytes_out'] ?? 0);
             $aivpnOffsetIn = (int) ($prev['aivpn_offset_bytes_in'] ?? 0);
             $aivpnOffsetOut = (int) ($prev['aivpn_offset_bytes_out'] ?? 0);
+            $xrayRawSentPrev = (int) ($prev['xray_raw_bytes_sent'] ?? 0);
+            $xrayRawReceivedPrev = (int) ($prev['xray_raw_bytes_received'] ?? 0);
+            $xrayOffsetSent = (int) ($prev['xray_offset_bytes_sent'] ?? 0);
+            $xrayOffsetReceived = (int) ($prev['xray_offset_bytes_received'] ?? 0);
 
             // XRay stats logic
             $stats = [];
@@ -2025,13 +2041,30 @@ class VpnClient
             $xrayContainerName = 'amnezia-xray'; // Default XRay container name
             
             if (!empty($this->data['protocol_id'])) {
-                $stmtProto = $pdo->prepare('SELECT slug FROM protocols WHERE id = ?');
-                $stmtProto->execute([$this->data['protocol_id']]);
+                $stmtProto = $pdo->prepare('
+                    SELECT p.slug, p.definition, sp.config_data
+                    FROM protocols p
+                    LEFT JOIN server_protocols sp
+                      ON sp.protocol_id = p.id AND sp.server_id = ?
+                    WHERE p.id = ?
+                    LIMIT 1
+                ');
+                $stmtProto->execute([$this->data['server_id'], $this->data['protocol_id']]);
                 $protoData = $stmtProto->fetch();
                 if ($protoData) {
                     $slug = (string) ($protoData['slug'] ?? '');
-                    if (stripos($slug, 'xray') !== false) {
+                    if (stripos($slug, 'xray') !== false || stripos($slug, 'vless') !== false) {
                         $isXray = true;
+                        $definition = json_decode((string) ($protoData['definition'] ?? ''), true) ?: [];
+                        $configData = json_decode((string) ($protoData['config_data'] ?? ''), true) ?: [];
+                        $extras = is_array($configData['extras'] ?? null) ? $configData['extras'] : [];
+                        $result = is_array($extras['result'] ?? null) ? $extras['result'] : [];
+                        $xrayContainerName = trim((string) (
+                            $extras['container_name']
+                            ?? $result['container_name']
+                            ?? $definition['metadata']['container_name']
+                            ?? 'amnezia-xray'
+                        ));
                     }
                     if (stripos($slug, 'aivpn') !== false) {
                         $isAivpn = true;
@@ -2082,12 +2115,28 @@ class VpnClient
                 }
 
                 if ($identifier && !empty($stats)) {
-                    // Infer online status for XRay: if traffic increased, they are online.
-                    // Update last_handshake to NOW() if activity detected.
-                    if ($stats['bytes_sent'] > $prevSent || $stats['bytes_received'] > $prevReceived) {
+                    $rawSent = (int) ($stats['bytes_sent'] ?? 0);
+                    $rawReceived = (int) ($stats['bytes_received'] ?? 0);
+
+                    if ($xrayRawSentPrev === 0 && $prevSent > 0) {
+                        $xrayOffsetSent = max($xrayOffsetSent, $prevSent - $rawSent);
+                    } elseif ($rawSent < $xrayRawSentPrev) {
+                        $xrayOffsetSent = max($xrayOffsetSent + $xrayRawSentPrev, $prevSent);
+                    }
+                    if ($xrayRawReceivedPrev === 0 && $prevReceived > 0) {
+                        $xrayOffsetReceived = max($xrayOffsetReceived, $prevReceived - $rawReceived);
+                    } elseif ($rawReceived < $xrayRawReceivedPrev) {
+                        $xrayOffsetReceived = max($xrayOffsetReceived + $xrayRawReceivedPrev, $prevReceived);
+                    }
+
+                    $stats['bytes_sent'] = max($prevSent, $xrayOffsetSent + $rawSent);
+                    $stats['bytes_received'] = max($prevReceived, $xrayOffsetReceived + $rawReceived);
+                    $stats['xray_raw_bytes_sent'] = $rawSent;
+                    $stats['xray_raw_bytes_received'] = $rawReceived;
+
+                    if ($rawSent > $xrayRawSentPrev || $rawReceived > $xrayRawReceivedPrev) {
                         $stats['last_handshake'] = time();
                     } else {
-                        // Keep previous handshake if no new activity
                         $stats['last_handshake'] = $prevHandshake;
                     }
                 }
@@ -2148,11 +2197,22 @@ class VpnClient
             }
 
             $isAivpnPersist = $isAivpn && !empty($stats);
+            $isXrayPersist = $isXray && !empty($stats);
             if ($isAivpnPersist) {
                 $stmt = $pdo->prepare('
                     UPDATE vpn_clients 
                     SET bytes_sent = ?, bytes_received = ?, last_handshake = ?, current_speed = ?, speed_up = ?, speed_down = ?,
                         aivpn_raw_bytes_in = ?, aivpn_raw_bytes_out = ?, aivpn_offset_bytes_in = ?, aivpn_offset_bytes_out = ?,
+                        last_sync_at = NOW()
+                    WHERE id = ?
+                ');
+            } elseif ($isXrayPersist) {
+                $stmt = $pdo->prepare('
+                    UPDATE vpn_clients
+                    SET bytes_sent = ?, bytes_received = ?, last_handshake = ?,
+                        current_speed = ?, speed_up = ?, speed_down = ?,
+                        xray_raw_bytes_sent = ?, xray_raw_bytes_received = ?,
+                        xray_offset_bytes_sent = ?, xray_offset_bytes_received = ?,
                         last_sync_at = NOW()
                     WHERE id = ?
                 ');
@@ -2180,6 +2240,22 @@ class VpnClient
                     (int) ($stats['bytes_received_raw'] ?? 0),
                     $aivpnOffsetIn,
                     $aivpnOffsetOut,
+                    $this->clientId
+                ]);
+            }
+
+            if ($isXrayPersist) {
+                return $stmt->execute([
+                    $stats['bytes_sent'],
+                    $stats['bytes_received'],
+                    $lastHandshake,
+                    $currentSpeed,
+                    $speedUp,
+                    $speedDown,
+                    (int) ($stats['xray_raw_bytes_sent'] ?? 0),
+                    (int) ($stats['xray_raw_bytes_received'] ?? 0),
+                    $xrayOffsetSent,
+                    $xrayOffsetReceived,
                     $this->clientId
                 ]);
             }

@@ -275,62 +275,99 @@ Router::get('/dashboard', function () {
 
             $serverModel = new VpnServer($serverId);
 
-            $xrayContainer = trim((string) ($serverRow['container_name'] ?? ''));
-            if ($xrayContainer === '' || stripos($xrayContainer, 'xray') === false) {
-                $xrayContainer = 'amnezia-xray';
-            }
-            $xrayCmd = 'docker exec ' . escapeshellarg($xrayContainer)
-                . ' xray api statsquery --pattern ' . escapeshellarg('user>>>')
-                . ' --server=127.0.0.1:10085 2>/dev/null || true';
-            $xrayRaw = (string) $serverModel->executeCommand($xrayCmd, true);
-            $xrayDecoded = json_decode(trim($xrayRaw), true);
-            if (is_array($xrayDecoded) && isset($xrayDecoded['stat']) && is_array($xrayDecoded['stat'])) {
+            $stmtXrayProtocols = $pdo->prepare("
+                SELECT p.id, p.definition, sp.config_data
+                FROM server_protocols sp
+                JOIN protocols p ON p.id = sp.protocol_id
+                WHERE sp.server_id = ?
+                  AND (p.slug LIKE '%xray%' OR p.slug LIKE '%vless%')
+            ");
+            $stmtXrayProtocols->execute([$serverId]);
+            foreach ($stmtXrayProtocols->fetchAll(PDO::FETCH_ASSOC) as $xrayProtocol) {
+                $definition = json_decode((string) ($xrayProtocol['definition'] ?? ''), true) ?: [];
+                $configData = json_decode((string) ($xrayProtocol['config_data'] ?? ''), true) ?: [];
+                $extras = is_array($configData['extras'] ?? null) ? $configData['extras'] : [];
+                $result = is_array($extras['result'] ?? null) ? $extras['result'] : [];
+                $xrayContainer = trim((string) (
+                    $extras['container_name']
+                    ?? $result['container_name']
+                    ?? $definition['metadata']['container_name']
+                    ?? 'amnezia-xray'
+                ));
+                if ($xrayContainer === '') {
+                    $xrayContainer = 'amnezia-xray';
+                }
+
+                $xrayCmd = 'docker exec ' . escapeshellarg($xrayContainer)
+                    . ' xray api statsquery --pattern ' . escapeshellarg('user>>>')
+                    . ' --server=127.0.0.1:10085 2>/dev/null || true';
+                $xrayDecoded = json_decode(trim((string) $serverModel->executeCommand($xrayCmd, true)), true);
+                if (!is_array($xrayDecoded['stat'] ?? null)) {
+                    continue;
+                }
+
                 $xrayUsers = [];
                 foreach ($xrayDecoded['stat'] as $stat) {
                     $name = (string) ($stat['name'] ?? '');
-                    $value = (int) ($stat['value'] ?? 0);
-                    if ($value <= 0 || !preg_match('/^user>>>(.+?)>>>traffic>>>(uplink|downlink)$/u', $name, $m)) {
+                    if (!preg_match('/^user>>>(.+?)>>>traffic>>>(uplink|downlink)$/u', $name, $m)) {
                         continue;
                     }
-
-                    $login = (string) $m[1];
-                    $direction = (string) $m[2];
-                    if (!isset($xrayUsers[$login])) {
-                        $xrayUsers[$login] = ['uplink' => 0, 'downlink' => 0];
-                    }
-                    $xrayUsers[$login][$direction] += $value;
+                    $xrayUsers[$m[1]][$m[2]] = (int) ($stat['value'] ?? 0);
                 }
 
                 foreach ($xrayUsers as $login => $traffic) {
                     $stmtClient = $pdo->prepare('
-                        SELECT id, bytes_sent, bytes_received
+                        SELECT id, bytes_sent, bytes_received,
+                               xray_raw_bytes_sent, xray_raw_bytes_received,
+                               xray_offset_bytes_sent, xray_offset_bytes_received
                         FROM vpn_clients
-                        WHERE server_id = ?
-                          AND status = \'active\'
-                          AND name = ?
+                        WHERE server_id = ? AND protocol_id = ?
+                          AND status = \'active\' AND name = ?
                         LIMIT 1
                     ');
-                    $stmtClient->execute([$serverId, $login]);
+                    $stmtClient->execute([$serverId, (int) $xrayProtocol['id'], $login]);
                     $clientRow = $stmtClient->fetch(PDO::FETCH_ASSOC);
                     if (!$clientRow) {
                         continue;
                     }
 
-                    $sent = (int) $traffic['uplink'];
-                    $received = (int) $traffic['downlink'];
-                    $hadIncrease = $sent > (int) ($clientRow['bytes_sent'] ?? 0)
-                        || $received > (int) ($clientRow['bytes_received'] ?? 0);
+                    $rawSent = (int) ($traffic['uplink'] ?? 0);
+                    $rawReceived = (int) ($traffic['downlink'] ?? 0);
+                    $prevRawSent = (int) ($clientRow['xray_raw_bytes_sent'] ?? 0);
+                    $prevRawReceived = (int) ($clientRow['xray_raw_bytes_received'] ?? 0);
+                    $offsetSent = (int) ($clientRow['xray_offset_bytes_sent'] ?? 0);
+                    $offsetReceived = (int) ($clientRow['xray_offset_bytes_received'] ?? 0);
+                    $prevSent = (int) ($clientRow['bytes_sent'] ?? 0);
+                    $prevReceived = (int) ($clientRow['bytes_received'] ?? 0);
 
+                    if ($prevRawSent === 0 && $prevSent > 0) {
+                        $offsetSent = max($offsetSent, $prevSent - $rawSent);
+                    } elseif ($rawSent < $prevRawSent) {
+                        $offsetSent = max($offsetSent + $prevRawSent, $prevSent);
+                    }
+                    if ($prevRawReceived === 0 && $prevReceived > 0) {
+                        $offsetReceived = max($offsetReceived, $prevReceived - $rawReceived);
+                    } elseif ($rawReceived < $prevRawReceived) {
+                        $offsetReceived = max($offsetReceived + $prevRawReceived, $prevReceived);
+                    }
+
+                    $hadIncrease = $rawSent > $prevRawSent || $rawReceived > $prevRawReceived;
                     $stmtUpdateXray = $pdo->prepare('
                         UPDATE vpn_clients
-                        SET bytes_sent = ?,
-                            bytes_received = ?,
-                            last_handshake = CASE WHEN ? THEN NOW() ELSE last_handshake END
+                        SET bytes_sent = ?, bytes_received = ?,
+                            xray_raw_bytes_sent = ?, xray_raw_bytes_received = ?,
+                            xray_offset_bytes_sent = ?, xray_offset_bytes_received = ?,
+                            last_handshake = CASE WHEN ? THEN NOW() ELSE last_handshake END,
+                            last_sync_at = NOW()
                         WHERE id = ?
                     ');
                     $stmtUpdateXray->execute([
-                        $sent,
-                        $received,
+                        max($prevSent, $offsetSent + $rawSent),
+                        max($prevReceived, $offsetReceived + $rawReceived),
+                        $rawSent,
+                        $rawReceived,
+                        $offsetSent,
+                        $offsetReceived,
                         $hadIncrease ? 1 : 0,
                         (int) $clientRow['id'],
                     ]);

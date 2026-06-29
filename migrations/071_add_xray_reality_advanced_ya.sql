@@ -117,7 +117,17 @@ cat > "${CONFIG_DIR}/server.json" <<EOJSON
     }
   ],
   "outbounds": [
-    { "protocol": "freedom", "tag": "direct" }
+    {
+      "protocol": "freedom",
+      "tag": "direct",
+      "settings": {
+        "domainStrategy": "UseIPv4"
+      }
+    },
+    {
+      "protocol": "blackhole",
+      "tag": "blocked"
+    }
   ],
   "routing": {
     "rules": [
@@ -125,6 +135,11 @@ cat > "${CONFIG_DIR}/server.json" <<EOJSON
         "inboundTag": [ "api" ],
         "outboundTag": "api",
         "type": "field"
+      },
+      {
+        "type": "field",
+        "ip": [ "::/0" ],
+        "outboundTag": "blocked"
       }
     ]
   }
