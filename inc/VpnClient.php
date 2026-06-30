@@ -311,6 +311,18 @@ class VpnClient
                 if (isset($vars['containername']) && empty($vars['container_name'])) {
                     $vars['container_name'] = $vars['containername'];
                 }
+                if (empty($vars['container_name']) && !empty($protoMetadata['container_name'])) {
+                    $vars['container_name'] = (string) $protoMetadata['container_name'];
+                }
+                if (empty($vars['config_dir']) && !empty($protoMetadata['config_dir'])) {
+                    $vars['config_dir'] = (string) $protoMetadata['config_dir'];
+                }
+                if (empty($vars['server_port']) && !empty($protoMetadata['default_port'])) {
+                    $vars['server_port'] = (string) $protoMetadata['default_port'];
+                }
+                if (empty($vars['reality_server_name']) && !empty($protoMetadata['server_name'])) {
+                    $vars['reality_server_name'] = (string) $protoMetadata['server_name'];
+                }
             }
             if (self::isXrayProtocolSlug($slug)) {
                 if (empty($vars['server_port'])) {
@@ -332,6 +344,9 @@ class VpnClient
                 $needReality = empty($vars['reality_public_key']) || empty($vars['reality_server_name']) || empty($vars['reality_short_id']);
                 if (empty($vars['client_id']) || $needReality) {
                     $containerName = 'amnezia-xray';
+                    if (!empty($vars['container_name'])) {
+                        $containerName = trim((string) $vars['container_name']) ?: $containerName;
+                    }
                     if (is_array($extras) && isset($extras['result']) && is_array($extras['result'])) {
                         $res = $extras['result'];
                         if (isset($res['container_name']) && is_scalar($res['container_name'])) {
@@ -339,9 +354,21 @@ class VpnClient
                         }
                     }
                     try {
-                        $cfg = $server->executeCommand("docker exec -i " . escapeshellarg($containerName) . " cat /opt/amnezia/xray/server.json 2>/dev/null", true);
-                        if (trim((string) $cfg) === '') {
-                            $cfg = $server->executeCommand("docker exec -i " . escapeshellarg($containerName) . " cat /etc/xray/config.json 2>/dev/null", true);
+                        $candidatePaths = [];
+                        if (!empty($vars['config_dir'])) {
+                            $candidatePaths[] = rtrim((string) $vars['config_dir'], '/') . '/server.json';
+                        }
+                        $candidatePaths = array_values(array_unique(array_merge($candidatePaths, [
+                            '/opt/amnezia/xray/server.json',
+                            '/opt/amnezia/xray-reality-advanced/server.json',
+                            '/etc/xray/config.json',
+                        ])));
+                        $cfg = '';
+                        foreach ($candidatePaths as $path) {
+                            $cfg = $server->executeCommand("docker exec -i " . escapeshellarg($containerName) . " cat " . escapeshellarg($path) . " 2>/dev/null", true);
+                            if (trim((string) $cfg) !== '') {
+                                break;
+                            }
                         }
                         $decoded = json_decode(trim((string) $cfg), true);
                         if (is_array($decoded)) {
