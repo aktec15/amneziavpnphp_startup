@@ -135,9 +135,13 @@ class VpnClient
                         if (isset($spExtras['awg_params']) && is_array($spExtras['awg_params'])) {
                             $awgSource = array_merge($awgSource, $spExtras['awg_params']);
                         }
-                        foreach (['Jc', 'Jmin', 'Jmax', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5'] as $ak) {
-                            if (isset($awgSource[$ak]) && $awgSource[$ak] !== '' && $awgSource[$ak] !== null) {
-                                $awgOverride[$ak] = $awgSource[$ak];
+                        $normalizedAwgSource = [];
+                        foreach ($awgSource as $ak => $av) {
+                            $normalizedAwgSource[strtoupper((string) $ak)] = $av;
+                        }
+                        foreach (['JC', 'JMIN', 'JMAX', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5'] as $ak) {
+                            if (isset($normalizedAwgSource[$ak]) && $normalizedAwgSource[$ak] !== '' && $normalizedAwgSource[$ak] !== null) {
+                                $awgOverride[$ak] = $normalizedAwgSource[$ak];
                             }
                         }
                         if (!empty($awgOverride)) {
@@ -243,7 +247,7 @@ class VpnClient
                 );
             }
 
-            self::addClientToServer($serverData, $keys['public'], $clientIP);
+            self::addClientToServer($serverData, $keys['public'], $clientIP, $loginFinal);
             $qrCode = self::generateQRCode($config, $slug);
             $priv = $keys['private'];
             $pub = $keys['public'];
@@ -919,6 +923,27 @@ class VpnClient
         ];
     }
 
+    private static function canonicalizeAwgParams(array $params, string $protocolSlug = ''): array
+    {
+        $allowedKeys = [
+            'JC', 'JMIN', 'JMAX',
+            'S1', 'S2', 'S3', 'S4',
+            'H1', 'H2', 'H3', 'H4',
+            'I1', 'I2', 'I3', 'I4', 'I5',
+        ];
+        $allowed = array_fill_keys($allowedKeys, true);
+        $normalized = [];
+
+        foreach ($params as $key => $value) {
+            $upperKey = strtoupper((string) $key);
+            if (isset($allowed[$upperKey])) {
+                $normalized[$upperKey] = $value;
+            }
+        }
+
+        return array_merge(self::getAwgParamDefaults($protocolSlug), $normalized);
+    }
+
     private static function extractAwgParamsFromWg0Conf(VpnServer $server, string $containerName, string $confPath): array
     {
         $awgParams = [];
@@ -1223,7 +1248,7 @@ class VpnClient
     /**
      * Add client to server using wg set (more reliable than syncconf)
      */
-    public static function addClientToServer(array $serverData, string $publicKey, string $clientIP): void
+    public static function addClientToServer(array $serverData, string $publicKey, string $clientIP, ?string $clientName = null): void
     {
         $containerName = $serverData['container_name'];
         $protocolSlug = (string) ($serverData['install_protocol'] ?? '');
@@ -1266,7 +1291,20 @@ class VpnClient
             $pskFile,
             $clientIP
         );
-        self::executeServerCommand($serverData, $cmd2, true);
+        $setOutput = self::executeServerCommand($serverData, $cmd2, true);
+        if (preg_match('/(not found|failed|error|permission denied|no such|invalid)/i', $setOutput)) {
+            throw new Exception('Failed to add client peer to server: ' . trim($setOutput));
+        }
+
+        $verifyCmd = sprintf(
+            "docker exec -i %s sh -c %s",
+            $containerName,
+            escapeshellarg(sprintf('%s show %s dump 2>/dev/null | grep -F %s || true', $wgTool, $ifaceName, escapeshellarg($publicKey)))
+        );
+        $verifyOutput = trim(self::executeServerCommand($serverData, $verifyCmd, true));
+        if ($verifyOutput === '') {
+            throw new Exception('Failed to add client peer to server: peer was not found after wg set');
+        }
 
         // 3. Remove temp PSK file
         $cmd3 = sprintf("docker exec -i %s rm -f %s", $containerName, $pskFile);
@@ -1283,7 +1321,7 @@ class VpnClient
         self::executeServerCommand($serverData, $cmd4, true);
 
         // 5. Update clientsTable
-        self::updateClientsTable($serverData, $publicKey, $clientIP);
+        self::updateClientsTable($serverData, $publicKey, $clientName ?: $clientIP);
 
         // 6. CRITICAL: Reload WG interface to apply AWG obfuscation params
         // Without this, the interface uses standard WireGuard without Jc/S1/S2/H1-H4
@@ -1331,6 +1369,15 @@ class VpnClient
      */
     private static function executeServerCommand(array $serverData, string $command, bool $sudo = false): string
     {
+        if (!empty($serverData['id'])) {
+            try {
+                $server = new VpnServer((int) $serverData['id']);
+                return $server->executeCommand($command, $sudo);
+            } catch (Exception $e) {
+                error_log('VpnServer::executeCommand failed, falling back to legacy SSH: ' . $e->getMessage());
+            }
+        }
+
         $needsSudo = $sudo && strtolower((string) ($serverData['username'] ?? '')) !== 'root';
         $baseCommand = $command;
 
@@ -1524,7 +1571,7 @@ class VpnClient
             $serverData = $server->getData();
             if ($serverData && $serverData['status'] === 'active') {
                 try {
-                    self::addClientToServer($serverData, $this->data['public_key'], $this->data['client_ip']);
+                    self::addClientToServer($serverData, $this->data['public_key'], $this->data['client_ip'], $this->data['name'] ?? $this->data['client_ip']);
                 } catch (Exception $e) {
                     throw new Exception('Failed to restore client on server: ' . $e->getMessage());
                 }
@@ -1767,6 +1814,54 @@ class VpnClient
             $serverData = $server->getData();
         }
 
+        if ($protocolId > 0) {
+            try {
+                $stmtSp = $pdo->prepare('SELECT config_data FROM server_protocols WHERE server_id = ? AND protocol_id = ? LIMIT 1');
+                $stmtSp->execute([(int) $this->data['server_id'], $protocolId]);
+                $spConfigRaw = $stmtSp->fetchColumn();
+                if ($spConfigRaw) {
+                    $spConfig = is_string($spConfigRaw) ? json_decode($spConfigRaw, true) : $spConfigRaw;
+                    if (is_array($spConfig)) {
+                        $spExtras = $spConfig['extras'] ?? [];
+                        if (isset($spExtras['result']) && is_array($spExtras['result'])) {
+                            $spExtras = array_merge($spExtras, $spExtras['result']);
+                        }
+                        if (!empty($spExtras['container_name'])) {
+                            $serverData['container_name'] = $spExtras['container_name'];
+                        }
+                        if (!empty($spExtras['server_public_key'])) {
+                            $serverData['server_public_key'] = $spExtras['server_public_key'];
+                        } elseif (!empty($spExtras['public_key'])) {
+                            $serverData['server_public_key'] = $spExtras['public_key'];
+                        }
+                        if (!empty($spExtras['preshared_key'])) {
+                            $serverData['preshared_key'] = $spExtras['preshared_key'];
+                        }
+                        if (!empty($spExtras['dns_servers'])) {
+                            $serverData['dns_servers'] = $spExtras['dns_servers'];
+                        }
+                        if (!empty($spExtras['vpn_port'])) {
+                            $serverData['vpn_port'] = $spExtras['vpn_port'];
+                        }
+                        if (!empty($spConfig['server_port'])) {
+                            $serverData['vpn_port'] = $spConfig['server_port'];
+                        }
+
+                        $awgSource = $spExtras;
+                        if (isset($spExtras['awg_params']) && is_array($spExtras['awg_params'])) {
+                            $awgSource = array_merge($awgSource, $spExtras['awg_params']);
+                        }
+                        $awgOverride = self::canonicalizeAwgParams($awgSource, $slug);
+                        if (!empty($awgOverride)) {
+                            $serverData['awg_params'] = json_encode($awgOverride);
+                        }
+                    }
+                }
+            } catch (Exception $e) {
+                error_log('Failed to load protocol config_data during regeneration: ' . $e->getMessage());
+            }
+        }
+
         $privateKey = (string) ($this->data['private_key'] ?? '');
         $clientPublicKey = (string) ($this->data['public_key'] ?? '');
         $clientIP = (string) ($this->data['client_ip'] ?? '');
@@ -1823,7 +1918,7 @@ class VpnClient
                 }
             }
 
-            $awgParams = array_merge(self::getAwgParamDefaults($slug), $awgParams);
+            $awgParams = self::canonicalizeAwgParams($awgParams, $slug);
 
             // Still missing? Refuse to overwrite config with template defaults.
             foreach ($needKeys as $k) {

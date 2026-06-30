@@ -1442,7 +1442,7 @@ class InstallProtocolManager
         $containerName = $metadata['container_name'] ?? $serverData['container_name'] ?? 'amnezia-awg';
         $configDir = trim((string) ($metadata['config_dir'] ?? ''));
         if ($configDir === '') {
-            $configDir = (($protocol['slug'] ?? '') === 'awg2') ? '/opt/amnezia/awg2' : '/opt/amnezia/awg';
+            $configDir = '/opt/amnezia/awg';
         }
         $candidateNames = array_values(array_unique(array_filter([
             is_string($containerName) ? trim($containerName) : '',
