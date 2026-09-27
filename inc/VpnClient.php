@@ -74,7 +74,7 @@ class VpnClient
                 $protoMetadata = $decodedDef['metadata'] ?? [];
             }
         }
-        $isWireguard = in_array($slug, ['amnezia-wg-advanced', 'wireguard-standard', 'amnezia-wg', 'awg2'], true);
+        $isWireguard = in_array($slug, ['amnezia-wg-advanced', 'wireguard-standard', 'amnezia-wg', 'awg2', 'awg31'], true);
 
         // Auto-sync server keys from container EVERY TIME for WireGuard protocols
         // This ensures we always use current container configuration even if it was recreated
@@ -139,7 +139,7 @@ class VpnClient
                         foreach ($awgSource as $ak => $av) {
                             $normalizedAwgSource[strtoupper((string) $ak)] = $av;
                         }
-                        foreach (['JC', 'JMIN', 'JMAX', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5'] as $ak) {
+                        foreach (['JC', 'JMIN', 'JMAX', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5', 'HEADERPROTECTIONKEY', 'CONTENTPADDINGADDITION', 'REKEYAFTERTIME', 'REKEYTIMEOUT', 'REJECTAFTERTIME', 'KEEPALIVETIMEOUT', 'MAXHANDSHAKEATTEMPTS', 'RANDOMTRAILERS', 'DISABLECOOKIES'] as $ak) {
                             if (isset($normalizedAwgSource[$ak]) && $normalizedAwgSource[$ak] !== '' && $normalizedAwgSource[$ak] !== null) {
                                 $awgOverride[$ak] = $normalizedAwgSource[$ak];
                             }
@@ -223,7 +223,7 @@ class VpnClient
             if (!isset($vars['Jmax']) && isset($vars['JMAX'])) {
                 $vars['Jmax'] = (string) $vars['JMAX'];
             }
-            foreach (['S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5'] as $key) {
+            foreach (['S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5', 'HEADERPROTECTIONKEY', 'CONTENTPADDINGADDITION', 'REKEYAFTERTIME', 'REKEYTIMEOUT', 'REJECTAFTERTIME', 'KEEPALIVETIMEOUT', 'MAXHANDSHAKEATTEMPTS', 'RANDOMTRAILERS', 'DISABLECOOKIES'] as $key) {
                 if (!isset($vars[$key]) && isset($vars[strtoupper($key)])) {
                     $vars[$key] = (string) $vars[strtoupper($key)];
                 }
@@ -829,7 +829,7 @@ class VpnClient
     {
         $containerName = $serverData['container_name'];
         $protocolSlug = (string) ($serverData['install_protocol'] ?? '');
-        $isAwg2 = (stripos($containerName, 'awg2') !== false || $protocolSlug === 'awg2');
+        $isAwg2 = (stripos($containerName, 'awg2') !== false || stripos($containerName, 'awg31') !== false || in_array($protocolSlug, ['awg2', 'awg31'], true));
         // The AWG2 userspace image exposes WireGuard-compatible `wg` for key
         // generation; it does not ship an `awg` binary.
         $wgTool = 'wg';
@@ -874,8 +874,14 @@ class VpnClient
         $stmt->execute([$serverData['id']]);
         $usedIPs = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
-        // Reserve network address and server gateway (.1)
-        $used = ['10.8.1.0' => true, '10.8.1.1' => true];
+        // Reserve the selected protocol's network address and server gateway (.1).
+        $subnetParts = explode('/', (string) ($serverData['vpn_subnet'] ?? '10.8.1.0/24'));
+        $networkAddressLong = ip2long($subnetParts[0]);
+        $used = [];
+        if ($networkAddressLong !== false) {
+            $used[long2ip($networkAddressLong)] = true;
+            $used[long2ip($networkAddressLong + 1)] = true;
+        }
         foreach ($usedIPs as $ip) {
             $used[$ip] = true;
         }
@@ -885,8 +891,9 @@ class VpnClient
             $containerName = $serverData['container_name'] ?? 'amnezia-awg';
             $server = new VpnServer($serverData['id']);
             $cmd = sprintf(
-                "docker exec %s cat /opt/amnezia/awg/wg0.conf 2>/dev/null",
-                escapeshellarg($containerName)
+                "docker exec %s sh -lc %s",
+                escapeshellarg($containerName),
+                escapeshellarg('cat /opt/amnezia/awg/awg0.conf 2>/dev/null || cat /opt/amnezia/awg/wg0.conf 2>/dev/null || true')
             );
             $serverConfig = $server->executeCommand($cmd, true);
 
@@ -902,7 +909,7 @@ class VpnClient
         }
 
         // Parse subnet
-        $parts = explode('/', $serverData['vpn_subnet']);
+        $parts = explode('/', (string) ($serverData['vpn_subnet'] ?? '10.8.1.0/24'));
         $networkLong = ip2long($parts[0]);
 
         // Find next free IP starting from .1
@@ -921,6 +928,36 @@ class VpnClient
      */
     private static function getAwgParamDefaults(string $protocolSlug = ''): array
     {
+        if ($protocolSlug === 'awg31') {
+            return [
+                'JC' => 6,
+                'JMIN' => 10,
+                'JMAX' => 50,
+                'S1' => 12,
+                'S2' => 12,
+                'S3' => 12,
+                'S4' => 12,
+                'H1' => 1,
+                'H2' => 2,
+                'H3' => 3,
+                'H4' => 4,
+                'I1' => '<r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>',
+                'I2' => '',
+                'I3' => '',
+                'I4' => '',
+                'I5' => '',
+                'HEADERPROTECTIONKEY' => '',
+                'CONTENTPADDINGADDITION' => '10-100',
+                'REKEYAFTERTIME' => '100-120',
+                'REKEYTIMEOUT' => '3-7',
+                'REJECTAFTERTIME' => '150-180',
+                'KEEPALIVETIMEOUT' => '5-15',
+                'MAXHANDSHAKEATTEMPTS' => '15-20',
+                'RANDOMTRAILERS' => 'on',
+                'DISABLECOOKIES' => 'on',
+            ];
+        }
+
         if ($protocolSlug === 'awg2') {
             return [
                 'JC' => 5,
@@ -928,10 +965,17 @@ class VpnClient
                 'JMAX' => 50,
                 'S1' => 51,
                 'S2' => 125,
+                'S3' => 13,
+                'S4' => 9,
                 'H1' => '1443912531-1981073285',
                 'H2' => '1984025557-2135018048',
                 'H3' => '2145217268-2146643749',
                 'H4' => '2146790761-2146860793',
+                'I1' => '<r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>',
+                'I2' => '',
+                'I3' => '',
+                'I4' => '',
+                'I5' => '',
             ];
         }
 
@@ -957,6 +1001,10 @@ class VpnClient
             'S1', 'S2', 'S3', 'S4',
             'H1', 'H2', 'H3', 'H4',
             'I1', 'I2', 'I3', 'I4', 'I5',
+            'HEADERPROTECTIONKEY', 'CONTENTPADDINGADDITION',
+            'REKEYAFTERTIME', 'REKEYTIMEOUT', 'REJECTAFTERTIME',
+            'KEEPALIVETIMEOUT', 'MAXHANDSHAKEATTEMPTS',
+            'RANDOMTRAILERS', 'DISABLECOOKIES',
         ];
         $allowed = array_fill_keys($allowedKeys, true);
         $normalized = [];
@@ -976,7 +1024,7 @@ class VpnClient
         $awgParams = [];
 
         $awgLinesCmd = sprintf(
-            "docker exec %s sh -c \"grep -E '^[[:space:]]*(Jc|Jmin|Jmax|S1|S2|S3|S4|H1|H2|H3|H4|I1|I2|I3|I4|I5)[[:space:]]*=' %s 2>/dev/null || true\"",
+            "docker exec %s sh -c \"grep -E '^[[:space:]]*(Jc|Jmin|Jmax|S1|S2|S3|S4|H1|H2|H3|H4|I1|I2|I3|I4|I5|HeaderProtectionKey|ContentPaddingAddition|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts|RandomTrailers|DisableCookies)[[:space:]]*=' %s 2>/dev/null || true\"",
             escapeshellarg($containerName),
             escapeshellarg($confPath)
         );
@@ -987,7 +1035,7 @@ class VpnClient
             if ($line === '') {
                 continue;
             }
-            if (preg_match('/^(Jc|Jmin|Jmax|S1|S2|S3|S4|H1|H2|H3|H4|I1|I2|I3|I4|I5)\s*=\s*(.*)$/i', $line, $m)) {
+            if (preg_match('/^(Jc|Jmin|Jmax|S1|S2|S3|S4|H1|H2|H3|H4|I1|I2|I3|I4|I5|HeaderProtectionKey|ContentPaddingAddition|RekeyAfterTime|RekeyTimeout|RejectAfterTime|KeepaliveTimeout|MaxHandshakeAttempts|RandomTrailers|DisableCookies)\s*=\s*(.*)$/i', $line, $m)) {
                 $k = strtoupper($m[1]);
                 $value = trim($m[2]);
                 $awgParams[$k] = ctype_digit($value) ? (int) $value : $value;
@@ -1006,7 +1054,7 @@ class VpnClient
 
         // wg show wg0 dump peer line format:
         // public_key \t preshared_key \t endpoint \t allowed_ips \t latest_handshake \t rx \t tx \t keepalive
-        $cmdDump = sprintf('docker exec %s wg show wg0 dump 2>/dev/null || true', escapeshellarg($containerName));
+        $cmdDump = sprintf('docker exec %s sh -lc %s', escapeshellarg($containerName), escapeshellarg('wg show awg0 dump 2>/dev/null || wg show wg0 dump 2>/dev/null || true'));
         $dump = (string) $server->executeCommand($cmdDump, true);
         foreach (preg_split('/\r?\n/', trim($dump)) as $line) {
             if ($line === '') {
@@ -1038,15 +1086,19 @@ class VpnClient
     {
         $containerName = $serverData['container_name'] ?? 'amnezia-awg';
         $protocolSlug = (string) ($serverData['install_protocol'] ?? '');
+        // AWG 3.1 keeps its host files in /opt/amnezia/awg31, but that
+        // directory is mounted at /opt/amnezia/awg inside the container.
         $primaryConfigDir = $protocolSlug === 'awg2' ? '/opt/amnezia/awg2' : '/opt/amnezia/awg';
+        $interfaceName = $protocolSlug === 'awg31' || stripos($containerName, 'awg31') !== false ? 'awg0' : 'wg0';
+        $configFileName = $interfaceName . '.conf';
 
         try {
             // Try to get public key from wg show
-            $pubKeyCmd = "docker exec $containerName wg show wg0 2>/dev/null | grep 'public key:' | awk '{print \$3}'";
+            $pubKeyCmd = "docker exec $containerName wg show $interfaceName 2>/dev/null | grep 'public key:' | awk '{print \$3}'";
             $pubKey = trim($server->executeCommand($pubKeyCmd, true));
 
             // Get listening port
-            $portCmd = "docker exec $containerName wg show wg0 2>/dev/null | grep 'listening port:' | awk '{print \$3}'";
+            $portCmd = "docker exec $containerName wg show $interfaceName 2>/dev/null | grep 'listening port:' | awk '{print \$3}'";
             $port = trim($server->executeCommand($portCmd, true));
 
             // PresharedKey is stored per-peer, and in this project we persist it in wireguard_psk.key.
@@ -1057,7 +1109,7 @@ class VpnClient
             $psk = trim($server->executeCommand($pskKeyFileCmd, true));
 
             if ($psk === '') {
-                $pskFromConfCmd = "docker exec $containerName sh -c \"grep -E '^[[:space:]]*PresharedKey[[:space:]]*=' $primaryConfigDir/wg0.conf 2>/dev/null | head -1 | sed -E 's/^[[:space:]]*PresharedKey[[:space:]]*=[[:space:]]*//' | tr -d '\\r'\" 2>/dev/null || true";
+                $pskFromConfCmd = "docker exec $containerName sh -c \"grep -E '^[[:space:]]*PresharedKey[[:space:]]*=' $primaryConfigDir/$configFileName 2>/dev/null | head -1 | sed -E 's/^[[:space:]]*PresharedKey[[:space:]]*=[[:space:]]*//' | tr -d '\\r'\" 2>/dev/null || true";
                 $psk = trim($server->executeCommand($pskFromConfCmd, true));
             }
 
@@ -1072,7 +1124,7 @@ class VpnClient
             }
 
             // Extract DNS from config
-            $dnsCmd = "docker exec $containerName sh -c \"grep -E '^DNS' $primaryConfigDir/wg0.conf 2>/dev/null | head -1 | cut -d= -f2 | tr -d '[:space:]'\" 2>/dev/null || echo ''";
+            $dnsCmd = "docker exec $containerName sh -c \"grep -E '^DNS' $primaryConfigDir/$configFileName 2>/dev/null | head -1 | cut -d= -f2 | tr -d '[:space:]'\" 2>/dev/null || echo ''";
             $dns = trim($server->executeCommand($dnsCmd, true));
 
             if (empty($dns) && $primaryConfigDir !== '/opt/amnezia/awg') {
@@ -1097,7 +1149,7 @@ class VpnClient
             $awgParams = [];
 
             // Legacy attempt: some builds print jc/jmin/... in `wg show` output.
-            $wgShowCmd = "docker exec $containerName wg show wg0 2>/dev/null";
+            $wgShowCmd = "docker exec $containerName wg show $interfaceName 2>/dev/null";
             $wgOutput = (string) $server->executeCommand($wgShowCmd, true);
             $paramNames = ['jc', 'jmin', 'jmax', 's1', 's2', 's3', 's4', 'h1', 'h2', 'h3', 'h4', 'i1', 'i2', 'i3', 'i4', 'i5'];
             foreach ($paramNames as $param) {
@@ -1114,15 +1166,17 @@ class VpnClient
                 }
             }
 
-            // Primary source: wg0.conf
-            if (empty($awgParams)) {
-                $awgParams = self::extractAwgParamsFromWg0Conf($server, $containerName, $primaryConfigDir . '/wg0.conf');
-                if (empty($awgParams) && $primaryConfigDir !== '/opt/amnezia/awg') {
-                    $awgParams = self::extractAwgParamsFromWg0Conf($server, $containerName, '/opt/amnezia/awg/wg0.conf');
-                }
-                if (empty($awgParams)) {
-                    $awgParams = self::extractAwgParamsFromWg0Conf($server, $containerName, '/etc/wireguard/wg0.conf');
-                }
+            // Primary source: wg0.conf. Always merge it because `wg show` may
+            // expose numeric AWG fields while omitting packet templates I1-I5.
+            $configAwgParams = self::extractAwgParamsFromWg0Conf($server, $containerName, $primaryConfigDir . '/' . $configFileName);
+            if (empty($configAwgParams) && $primaryConfigDir !== '/opt/amnezia/awg') {
+                $configAwgParams = self::extractAwgParamsFromWg0Conf($server, $containerName, '/opt/amnezia/awg/wg0.conf');
+            }
+            if (empty($configAwgParams)) {
+                $configAwgParams = self::extractAwgParamsFromWg0Conf($server, $containerName, '/etc/wireguard/wg0.conf');
+            }
+            if (!empty($configAwgParams)) {
+                $awgParams = array_merge($awgParams, $configAwgParams);
             }
 
             // Update database if we found keys
@@ -1223,9 +1277,10 @@ class VpnClient
         foreach ($normalizedAwgParams as $key => $value) {
             $upperKey = strtoupper($key);
             
-            // For H1-H4 parameters, only use server value if it has the correct "value1-value2" format
+            // AWG 2.0 expects dynamic ranges; AWG 3.1 protects the fixed headers
+            // with HeaderProtectionKey and therefore uses the standard 1/2/3/4 values.
             if (in_array($upperKey, ['H1', 'H2', 'H3', 'H4'], true)) {
-                if (is_string($value) && preg_match('/^\d+-\d+$/', $value)) {
+                if (($protocolSlug === 'awg31' && preg_match('/^\d+$/', (string) $value)) || (is_string($value) && preg_match('/^\d+-\d+$/', $value))) {
                     $finalParams[$upperKey] = $value;
                 }
                 // Otherwise keep the default value
@@ -1244,8 +1299,11 @@ class VpnClient
         // For awg2 include I1-I5, S3, S4; for regular awg only H1-H4, Jc, Jmin, Jmax, S1, S2
         // Order: Jc, Jmin, Jmax, S1, S2, S3, S4, H1, H2, H3, H4, I1, I2, I3, I4, I5
         $paramKeys = ['Jc', 'Jmin', 'Jmax', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4'];
-        if ($protocolSlug === 'awg2') {
+        if (in_array($protocolSlug, ['awg2', 'awg31'], true)) {
             $paramKeys = array_merge($paramKeys, ['I1', 'I2', 'I3', 'I4', 'I5']);
+        }
+        if ($protocolSlug === 'awg31') {
+            $paramKeys = array_merge($paramKeys, ['HeaderProtectionKey', 'ContentPaddingAddition', 'RekeyAfterTime', 'RekeyTimeout', 'RejectAfterTime', 'KeepaliveTimeout', 'MaxHandshakeAttempts', 'RandomTrailers', 'DisableCookies']);
         }
         
         foreach ($paramKeys as $key) {
@@ -1279,7 +1337,7 @@ class VpnClient
     {
         $containerName = $serverData['container_name'];
         $protocolSlug = (string) ($serverData['install_protocol'] ?? '');
-        $isAwg2 = (stripos($containerName, 'awg2') !== false || $protocolSlug === 'awg2');
+        $isAwg2 = (stripos($containerName, 'awg2') !== false || stripos($containerName, 'awg31') !== false || in_array($protocolSlug, ['awg2', 'awg31'], true));
         $configDir = '/opt/amnezia/awg';
 
         // AWG2: try awg0.conf first (standard), fall back to wg0.conf (legacy panel installs)
@@ -1511,7 +1569,7 @@ class VpnClient
             }
 
             // For AWG2 and other WireGuard/AWG, use vpn:// URL format with JSON + zlib
-            $payloadVpn = QrUtil::encodeVpnUrlConf($config, $protocolSlug);
+            $payloadVpn = 'vpn://' . QrUtil::encodeVpnUrlConf($config, $protocolSlug);
             $dataUri = QrUtil::pngBase64($payloadVpn);
             return $dataUri;
         } catch (Throwable $e) {
@@ -1568,6 +1626,7 @@ class VpnClient
         if ($isWireguard) {
             $server = new VpnServer($this->data['server_id']);
             $serverData = $server->getData();
+            $serverData = self::applyProtocolRuntimeToServerData($serverData, (int) ($this->data['protocol_id'] ?? 0));
             if ($serverData && $serverData['status'] === 'active') {
                 try {
                     self::removeClientFromServer($serverData, $this->data['public_key']);
@@ -1596,6 +1655,7 @@ class VpnClient
         if ($isWireguard) {
             $server = new VpnServer($this->data['server_id']);
             $serverData = $server->getData();
+            $serverData = self::applyProtocolRuntimeToServerData($serverData, (int) ($this->data['protocol_id'] ?? 0));
             if ($serverData && $serverData['status'] === 'active') {
                 try {
                     self::addClientToServer($serverData, $this->data['public_key'], $this->data['client_ip'], $this->data['name'] ?? $this->data['client_ip']);
@@ -1620,10 +1680,95 @@ class VpnClient
             $stmt = $pdo->prepare('SELECT slug FROM protocols WHERE id = ?');
             $stmt->execute([$protocolId]);
             $slug = (string) $stmt->fetchColumn();
-            return in_array($slug, ['amnezia-wg-advanced', 'wireguard-standard', 'amnezia-wg', 'awg2'], true);
+            return in_array($slug, ['amnezia-wg-advanced', 'wireguard-standard', 'amnezia-wg', 'awg2', 'awg31'], true);
         } catch (Exception $e) {
             return true;
         }
+    }
+
+    /**
+     * Overlay protocol-specific runtime metadata on the primary server row.
+     * A single VPS can host AWG2, AWG 3.1 and Xray in separate containers,
+     * while vpn_servers keeps only the primary protocol fields.
+     */
+    private static function applyProtocolRuntimeToServerData(array $serverData, ?int $protocolId): array
+    {
+        if (!$protocolId || empty($serverData['id'])) {
+            return $serverData;
+        }
+
+        try {
+            $pdo = DB::conn();
+            $stmt = $pdo->prepare('SELECT slug, definition FROM protocols WHERE id = ? LIMIT 1');
+            $stmt->execute([$protocolId]);
+            $protocol = $stmt->fetch();
+            if (!$protocol) {
+                return $serverData;
+            }
+
+            $slug = (string) ($protocol['slug'] ?? '');
+            if ($slug !== '') {
+                $serverData['install_protocol'] = $slug;
+            }
+
+            $definition = $protocol['definition'] ?? [];
+            if (is_string($definition)) {
+                $definition = json_decode($definition, true) ?: [];
+            }
+            $metadata = is_array($definition) ? ($definition['metadata'] ?? []) : [];
+            if (!empty($metadata['container_name'])) {
+                $serverData['container_name'] = (string) $metadata['container_name'];
+            }
+            if (!empty($metadata['vpn_subnet'])) {
+                $serverData['vpn_subnet'] = (string) $metadata['vpn_subnet'];
+            }
+
+            $stmtConfig = $pdo->prepare('SELECT config_data FROM server_protocols WHERE server_id = ? AND protocol_id = ? LIMIT 1');
+            $stmtConfig->execute([(int) $serverData['id'], $protocolId]);
+            $raw = $stmtConfig->fetchColumn();
+            if (!$raw) {
+                return $serverData;
+            }
+
+            $config = is_string($raw) ? json_decode($raw, true) : $raw;
+            if (!is_array($config)) {
+                return $serverData;
+            }
+
+            $extras = $config['extras'] ?? [];
+            if (!is_array($extras)) {
+                $extras = [];
+            }
+            if (isset($extras['result']) && is_array($extras['result'])) {
+                $extras = array_merge($extras, $extras['result']);
+            }
+
+            foreach (['container_name', 'server_public_key', 'preshared_key', 'dns_servers'] as $key) {
+                if (isset($extras[$key]) && $extras[$key] !== '') {
+                    $serverData[$key] = $extras[$key];
+                }
+            }
+            if (!empty($config['server_port'])) {
+                $serverData['vpn_port'] = (int) $config['server_port'];
+            } elseif (!empty($extras['vpn_port'])) {
+                $serverData['vpn_port'] = (int) $extras['vpn_port'];
+            } elseif (!empty($extras['server_port'])) {
+                $serverData['vpn_port'] = (int) $extras['server_port'];
+            }
+
+            $awgSource = $extras;
+            if (isset($extras['awg_params']) && is_array($extras['awg_params'])) {
+                $awgSource = array_merge($awgSource, $extras['awg_params']);
+            }
+            $awgParams = self::canonicalizeAwgParams($awgSource, $slug);
+            if (!empty($awgParams)) {
+                $serverData['awg_params'] = json_encode($awgParams);
+            }
+        } catch (Throwable $e) {
+            error_log('Failed to apply protocol runtime metadata: ' . $e->getMessage());
+        }
+
+        return $serverData;
     }
 
     /**
@@ -1657,7 +1802,7 @@ class VpnClient
         $configDir = '/opt/amnezia/awg';
 
         // AWG2: try awg0.conf first (standard), fall back to wg0.conf (legacy panel installs)
-        $isAwg2 = (stripos($containerName, 'awg2') !== false || $protocolSlug === 'awg2');
+        $isAwg2 = (stripos($containerName, 'awg2') !== false || stripos($containerName, 'awg31') !== false || in_array($protocolSlug, ['awg2', 'awg31'], true));
         $configFile = $isAwg2 ? 'awg0.conf' : 'wg0.conf';
         $testConf = trim(self::executeServerCommand($serverData, "docker exec -i {$containerName} cat {$configDir}/{$configFile} 2>/dev/null", true));
         if ($isAwg2 && ($testConf === '' || strpos($testConf, '[Interface]') === false)) {
@@ -1829,7 +1974,8 @@ class VpnClient
             $protoRow = $stmt->fetch();
         }
         $slug = $protoRow['slug'] ?? '';
-        $isWireguard = in_array($slug, ['amnezia-wg-advanced', 'wireguard-standard', 'amnezia-wg', 'awg2'], true);
+        $serverData = self::applyProtocolRuntimeToServerData($serverData, $protocolId);
+        $isWireguard = in_array($slug, ['amnezia-wg-advanced', 'wireguard-standard', 'amnezia-wg', 'awg2', 'awg31'], true);
 
         if (!$isWireguard) {
             return ['success' => false, 'error' => 'not_wireguard_protocol', 'protocol_slug' => $slug];
@@ -1905,27 +2051,31 @@ class VpnClient
         // by duplicating them into canonical uppercase AWG keys.
         foreach ($awgParams as $k => $v) {
             $uk = strtoupper((string) $k);
-            if (in_array($uk, ['JC', 'JMIN', 'JMAX', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5'], true) && !isset($awgParams[$uk])) {
+            if (in_array($uk, ['JC', 'JMIN', 'JMAX', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5', 'HEADERPROTECTIONKEY', 'CONTENTPADDINGADDITION', 'REKEYAFTERTIME', 'REKEYTIMEOUT', 'REJECTAFTERTIME', 'KEEPALIVETIMEOUT', 'MAXHANDSHAKEATTEMPTS', 'RANDOMTRAILERS', 'DISABLECOOKIES'], true) && !isset($awgParams[$uk])) {
                 $awgParams[$uk] = $v;
             }
         }
 
         // If AWG params are missing (common after reinstall), fetch them directly from wg0.conf
         // to avoid falling back to template defaults that will not match the server.
-        if (in_array($slug, ['amnezia-wg-advanced', 'awg2'], true)) {
+        if (in_array($slug, ['amnezia-wg-advanced', 'awg2', 'awg31'], true)) {
             $needKeys = ['JC', 'JMIN', 'JMAX', 'S1', 'S2', 'H1', 'H2', 'H3', 'H4'];
+            if ($slug === 'awg31') {
+                $needKeys[] = 'HEADERPROTECTIONKEY';
+            }
             $missing = false;
             foreach ($needKeys as $k) {
-                if (!isset($awgParams[$k])) {
+                if (!isset($awgParams[$k]) || ($k === 'HEADERPROTECTIONKEY' && trim((string) $awgParams[$k]) === '')) {
                     $missing = true;
                     break;
                 }
             }
 
             if ($missing) {
-                $containerName = $serverData['container_name'] ?? ($slug === 'awg2' ? 'amnezia-awg2' : 'amnezia-awg');
+                $containerName = $serverData['container_name'] ?? ($slug === 'awg2' ? 'amnezia-awg2' : ($slug === 'awg31' ? 'amnezia-awg31' : 'amnezia-awg'));
                 $configDir = $slug === 'awg2' ? '/opt/amnezia/awg2' : '/opt/amnezia/awg';
-                $direct = self::extractAwgParamsFromWg0Conf($server, $containerName, $configDir . '/wg0.conf');
+                $configFile = $slug === 'awg31' ? 'awg0.conf' : 'wg0.conf';
+                $direct = self::extractAwgParamsFromWg0Conf($server, $containerName, $configDir . '/' . $configFile);
                 if (empty($direct)) {
                     $direct = self::extractAwgParamsFromWg0Conf($server, $containerName, '/etc/wireguard/wg0.conf');
                 }
@@ -1949,7 +2099,7 @@ class VpnClient
 
             // Still missing? Refuse to overwrite config with template defaults.
             foreach ($needKeys as $k) {
-                if (!isset($awgParams[$k])) {
+                if (!isset($awgParams[$k]) || ($k === 'HEADERPROTECTIONKEY' && trim((string) $awgParams[$k]) === '')) {
                     return [
                         'success' => false,
                         'error' => 'awg_params_missing',
@@ -1998,7 +2148,7 @@ class VpnClient
         if (!isset($vars['Jmax']) && isset($vars['JMAX'])) {
             $vars['Jmax'] = (string) $vars['JMAX'];
         }
-        foreach (['S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5'] as $key) {
+        foreach (['S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5', 'HEADERPROTECTIONKEY', 'CONTENTPADDINGADDITION', 'REKEYAFTERTIME', 'REKEYTIMEOUT', 'REJECTAFTERTIME', 'KEEPALIVETIMEOUT', 'MAXHANDSHAKEATTEMPTS', 'RANDOMTRAILERS', 'DISABLECOOKIES'] as $key) {
             if (!isset($vars[$key]) && isset($vars[strtoupper($key)])) {
                 $vars[$key] = (string) $vars[strtoupper($key)];
             }
@@ -2126,6 +2276,8 @@ class VpnClient
         if (!$serverData || $serverData['status'] !== 'active') {
             return false;
         }
+
+        $serverData = self::applyProtocolRuntimeToServerData($serverData, (int) ($this->data['protocol_id'] ?? 0));
 
         try {
             // Get previous stats for speed calculation
@@ -2507,9 +2659,11 @@ class VpnClient
     private static function getClientStatsFromServer(array $serverData, string $publicKey): array
     {
         $containerName = $serverData['container_name'];
+        $protocolSlug = (string) ($serverData['install_protocol'] ?? '');
+        $interfaceName = ($protocolSlug === 'awg31' || stripos($containerName, 'awg31') !== false) ? 'awg0' : 'wg0';
 
         // Get WireGuard interface stats
-        $cmd = sprintf("docker exec -i %s wg show wg0 dump", $containerName);
+        $cmd = sprintf("docker exec -i %s wg show %s dump", $containerName, $interfaceName);
         $output = self::executeServerCommand($serverData, $cmd, true);
 
         $stats = [

@@ -379,7 +379,7 @@ Router::get('/dashboard', function () {
                 FROM server_protocols sp
                 JOIN protocols p ON p.id = sp.protocol_id
                 WHERE sp.server_id = ?
-                  AND (p.slug LIKE '%wg%' OR p.slug LIKE '%wireguard%' OR p.slug = 'awg2')
+                  AND (p.slug LIKE '%wg%' OR p.slug LIKE '%wireguard%' OR p.slug IN ('awg2', 'awg31'))
             ");
             $stmtProto->execute([$serverId]);
             $protocolRows = $stmtProto->fetchAll(PDO::FETCH_ASSOC);
@@ -399,7 +399,11 @@ Router::get('/dashboard', function () {
 
                 $containerName = trim((string) ($extras['container_name'] ?? ''));
                 if ($containerName === '') {
-                    $containerName = ($protocolRow['slug'] ?? '') === 'awg2' ? 'amnezia-awg2' : 'amnezia-awg';
+                    $containerName = match ($protocolRow['slug'] ?? '') {
+                        'awg2' => 'amnezia-awg2',
+                        'awg31' => 'amnezia-awg31',
+                        default => 'amnezia-awg',
+                    };
                 }
 
                 $dumpCmd = 'docker exec ' . escapeshellarg($containerName) . ' wg show all dump 2>/dev/null || true';
@@ -1420,6 +1424,7 @@ Router::get('/clients/{id}', function ($params) {
         $qrCodeVpnUrl = '';
         $vpnUrlConfig = '';
         $isAwg2 = false;
+        $protocolSlug = '';
         try {
             $pdo = DB::conn();
             $protocol = null;
@@ -1436,11 +1441,11 @@ Router::get('/clients/{id}', function ($params) {
             if ($protocol) {
                 $clientData['show_text_content'] = !empty($protocol['show_text_content']);
                 $protocolSlug = $protocol['slug'] ?? '';
-                $isAwg2 = ($protocolSlug === 'awg2');
+                $isAwg2 = in_array($protocolSlug, ['awg2', 'awg31'], true);
             }
             if ($protocol && ($protocol['output_template'] ?? '') !== '') {
                 $slug = $protocol['slug'] ?? '';
-                $isWireguard = in_array($slug, ['amnezia-wg-advanced', 'wireguard-standard', 'amnezia-wg', 'awg2'], true);
+                $isWireguard = in_array($slug, ['amnezia-wg-advanced', 'wireguard-standard', 'amnezia-wg', 'awg2', 'awg31'], true);
                 if ($isWireguard) {
                     // Show WireGuard/AWG config text when the protocol allows text content.
                     $protocolOutput = !empty($protocol['show_text_content']) ? ($clientData['config'] ?? '') : '';
@@ -1453,11 +1458,11 @@ Router::get('/clients/{id}', function ($params) {
             // Generate second QR code and vpn:// config for AWG2
             if ($isAwg2 && !empty($clientData['config'])) {
                 try {
-                    $qrCodeVpnUrl = VpnClient::generateQRCodeVpnUrl($clientData['config'], 'awg2');
+                    $qrCodeVpnUrl = VpnClient::generateQRCodeVpnUrl($clientData['config'], $protocolSlug);
                     
                     // Generate vpn:// URL string using vpn:// format (JSON + zlib)
                     require_once __DIR__ . '/../inc/QrUtil.php';
-                    $vpnUrlConfig = 'vpn://' . QrUtil::encodeVpnUrlConf($clientData['config'], 'awg2');
+                    $vpnUrlConfig = 'vpn://' . QrUtil::encodeVpnUrlConf($clientData['config'], $protocolSlug);
                 } catch (Exception $e) {
                     // Ignore errors, just don't show the second QR
                 }

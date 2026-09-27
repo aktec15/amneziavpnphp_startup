@@ -867,6 +867,9 @@ class ServerMonitoring
         if ($protocolSlug === 'awg2') {
             return 'amnezia-awg2';
         }
+        if ($protocolSlug === 'awg31') {
+            return 'amnezia-awg31';
+        }
         if (stripos($protocolSlug, 'aivpn') !== false) {
             return 'aivpn-server';
         }

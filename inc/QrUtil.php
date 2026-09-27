@@ -13,9 +13,11 @@ class QrUtil
     {
         // Try to load Composer autoload if not yet loaded
         if (!class_exists(QrCode::class)) {
-            $autoload = __DIR__ . '/vendor/autoload.php';
-            if (file_exists($autoload)) {
-                require_once $autoload;
+            foreach ([__DIR__ . '/../vendor/autoload.php', __DIR__ . '/vendor/autoload.php'] as $autoload) {
+                if (file_exists($autoload)) {
+                    require_once $autoload;
+                    break;
+                }
             }
         }
         // Prefer Composer library; PNG when GD is available, otherwise SVG fallback
@@ -78,7 +80,7 @@ class QrUtil
     {
         // For AWG2, use simple format: header + plain config text (like real Amnezia app)
         // For other protocols, use the old JSON+compression format for backward compatibility
-        if ($protocolSlug === 'awg2') {
+        if (in_array($protocolSlug, ['awg2', 'awg31'], true)) {
             return self::encodeSimpleConf($confText);
         }
         
@@ -93,7 +95,7 @@ class QrUtil
      */
     public static function encodeVpnUrlPayload(string $confText, string $protocolSlug = ''): string
     {
-        if ($protocolSlug === 'awg2') {
+        if (in_array($protocolSlug, ['awg2', 'awg31'], true)) {
             return self::encodeVpnUrlConf($confText);
         }
         
@@ -302,6 +304,15 @@ class QrUtil
             'S2' => null,
             'S3' => null,
             'S4' => null,
+            'HeaderProtectionKey' => null,
+            'ContentPaddingAddition' => null,
+            'RekeyAfterTime' => null,
+            'RekeyTimeout' => null,
+            'RejectAfterTime' => null,
+            'KeepaliveTimeout' => null,
+            'MaxHandshakeAttempts' => null,
+            'RandomTrailers' => null,
+            'DisableCookies' => null,
         ];
         foreach (explode("\n", $conf) as $line) {
             $line = trim($line);
@@ -331,6 +342,15 @@ class QrUtil
             'S2' => (string) ($params['S2'] ?? ''),
             'S3' => (string) ($params['S3'] ?? ''),
             'S4' => (string) ($params['S4'] ?? ''),
+            'HeaderProtectionKey' => (string) ($params['HeaderProtectionKey'] ?? ''),
+            'ContentPaddingAddition' => (string) ($params['ContentPaddingAddition'] ?? ''),
+            'RekeyAfterTime' => (string) ($params['RekeyAfterTime'] ?? ''),
+            'RekeyTimeout' => (string) ($params['RekeyTimeout'] ?? ''),
+            'RejectAfterTime' => (string) ($params['RejectAfterTime'] ?? ''),
+            'KeepaliveTimeout' => (string) ($params['KeepaliveTimeout'] ?? ''),
+            'MaxHandshakeAttempts' => (string) ($params['MaxHandshakeAttempts'] ?? ''),
+            'RandomTrailers' => (string) ($params['RandomTrailers'] ?? ''),
+            'DisableCookies' => (string) ($params['DisableCookies'] ?? ''),
             'allowed_ips' => $allowedIps ?: ['0.0.0.0/0', '::/0'],
             'clientId' => $clientPubKey ?: '',
             'client_ip' => preg_replace('/\/(\d{1,2})$/', '', (string) ($address ?? '')),
@@ -462,6 +482,15 @@ class QrUtil
             'S2' => null,
             'S3' => null,
             'S4' => null,
+            'HeaderProtectionKey' => null,
+            'ContentPaddingAddition' => null,
+            'RekeyAfterTime' => null,
+            'RekeyTimeout' => null,
+            'RejectAfterTime' => null,
+            'KeepaliveTimeout' => null,
+            'MaxHandshakeAttempts' => null,
+            'RandomTrailers' => null,
+            'DisableCookies' => null,
         ];
         foreach (explode("\n", $conf) as $line) {
             $line = trim($line);
@@ -525,7 +554,7 @@ class QrUtil
                         'last_config' => json_encode($lastConfigObj, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT),
                         'port' => (string) $endpointPort,
                         'transport_proto' => 'udp',
-                    ] + ($protocolSlug === 'awg2' ? [
+                    ] + (in_array($protocolSlug, ['awg2', 'awg31'], true) ? [
                         'I1' => (string) ($params['I1'] ?? ''),
                         'I2' => (string) ($params['I2'] ?? ''),
                         'I3' => (string) ($params['I3'] ?? ''),
@@ -533,13 +562,23 @@ class QrUtil
                         'I5' => (string) ($params['I5'] ?? ''),
                         'S3' => (string) ($params['S3'] ?? ''),
                         'S4' => (string) ($params['S4'] ?? ''),
-                        'protocol_version' => '2',
+                        'protocol_version' => $protocolSlug === 'awg31' ? '3.1' : '2',
                         'subnet_address' => (string) ($address ? (preg_match('/^(\d+\.\d+\.\d+)\.\d+/', $address, $m) ? $m[1] . '.0' : '10.8.1.0') : '10.8.1.0'),
-                    ] : []),
-                    'container' => $protocolSlug === 'awg2' ? 'amnezia-awg2' : 'amnezia-awg',
+                    ] + ($protocolSlug === 'awg31' ? [
+                        'HeaderProtectionKey' => (string) ($params['HeaderProtectionKey'] ?? ''),
+                        'ContentPaddingAddition' => (string) ($params['ContentPaddingAddition'] ?? ''),
+                        'RekeyAfterTime' => (string) ($params['RekeyAfterTime'] ?? ''),
+                        'RekeyTimeout' => (string) ($params['RekeyTimeout'] ?? ''),
+                        'RejectAfterTime' => (string) ($params['RejectAfterTime'] ?? ''),
+                        'KeepaliveTimeout' => (string) ($params['KeepaliveTimeout'] ?? ''),
+                        'MaxHandshakeAttempts' => (string) ($params['MaxHandshakeAttempts'] ?? ''),
+                        'RandomTrailers' => (string) ($params['RandomTrailers'] ?? ''),
+                        'DisableCookies' => (string) ($params['DisableCookies'] ?? ''),
+                    ] : []) : []),
+                    'container' => in_array($protocolSlug, ['awg2', 'awg31'], true) ? 'amnezia-awg2' : 'amnezia-awg',
                 ],
             ],
-            'defaultContainer' => $protocolSlug === 'awg2' ? 'amnezia-awg2' : 'amnezia-awg',
+            'defaultContainer' => in_array($protocolSlug, ['awg2', 'awg31'], true) ? 'amnezia-awg2' : 'amnezia-awg',
             'description' => $serverDesc,
             'dns1' => $dns1,
             'dns2' => $dns2,

@@ -354,7 +354,7 @@ class InstallProtocolManager
             $awgParams = $result['awg_params'] ?? null;
             if (!is_array($awgParams)) {
                 $flat = [];
-                foreach (['Jc', 'Jmin', 'Jmax', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5'] as $k) {
+                foreach (['Jc', 'Jmin', 'Jmax', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5', 'HeaderProtectionKey', 'ContentPaddingAddition', 'RekeyAfterTime', 'RekeyTimeout', 'RejectAfterTime', 'KeepaliveTimeout', 'MaxHandshakeAttempts', 'RandomTrailers', 'DisableCookies'] as $k) {
                     if (array_key_exists($k, $result) && $result[$k] !== '' && $result[$k] !== null) {
                         $flat[$k] = $result[$k];
                     }
@@ -425,7 +425,7 @@ class InstallProtocolManager
 
         // AWG2 uses awg0.conf (standard, same as native Amnezia app)
         // Old AWG uses wg0.conf
-        $isAwg2 = (stripos($containerName, 'awg2') !== false || ($protocol['slug'] ?? '') === 'awg2');
+        $isAwg2 = (stripos($containerName, 'awg2') !== false || stripos($containerName, 'awg31') !== false || in_array(($protocol['slug'] ?? ''), ['awg2', 'awg31'], true));
         $configDir = '/opt/amnezia/awg';
         $configFile = $isAwg2 ? 'awg0.conf' : 'wg0.conf';
 
@@ -530,7 +530,7 @@ class InstallProtocolManager
         $containerArg = escapeshellarg($containerName);
 
         // Config is always wg0.conf — container CMD runs: awg-quick up /opt/amnezia/awg/wg0.conf
-        $isAwg2 = (stripos($containerName, 'awg2') !== false || ($protocol['slug'] ?? '') === 'awg2');
+        $isAwg2 = (stripos($containerName, 'awg2') !== false || stripos($containerName, 'awg31') !== false || in_array(($protocol['slug'] ?? ''), ['awg2', 'awg31'], true));
         $configDir = '/opt/amnezia/awg';
         // AWG2: try awg0.conf first (standard), fall back to wg0.conf (legacy)
         $configFile = $isAwg2 ? 'awg0.conf' : 'wg0.conf';
@@ -1199,7 +1199,7 @@ class InstallProtocolManager
     private static function parseWireGuardConfig(string $config): array
     {
         $lines = preg_split('/\r?\n/', $config);
-        $awgKeys = ['Jc', 'Jmin', 'Jmax', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5'];
+        $awgKeys = ['Jc', 'Jmin', 'Jmax', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5', 'HeaderProtectionKey', 'ContentPaddingAddition', 'RekeyAfterTime', 'RekeyTimeout', 'RejectAfterTime', 'KeepaliveTimeout', 'MaxHandshakeAttempts', 'RandomTrailers', 'DisableCookies'];
         $awgParams = [];
         $listenPort = null;
 
@@ -1270,7 +1270,8 @@ class InstallProtocolManager
             // AWG variants
             'amnezia-wg'            => 'awg',
             'amnezia-wg-advanced'   => 'awg',
-            'awg2'                  => 'awg',
+            'awg2'                  => 'script',
+            'awg31'                 => 'script',
         ];
 
         if (isset($slugMap[$slug])) {
@@ -1570,7 +1571,7 @@ class InstallProtocolManager
                 $resolvedAwgParams = $res['awg_params'] ?? null;
                 if (!is_array($resolvedAwgParams)) {
                     $candidate = [];
-                    foreach (['Jc', 'Jmin', 'Jmax', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5'] as $k) {
+                    foreach (['Jc', 'Jmin', 'Jmax', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'I1', 'I2', 'I3', 'I4', 'I5', 'HeaderProtectionKey', 'ContentPaddingAddition', 'RekeyAfterTime', 'RekeyTimeout', 'RejectAfterTime', 'KeepaliveTimeout', 'MaxHandshakeAttempts', 'RandomTrailers', 'DisableCookies'] as $k) {
                         if (array_key_exists($k, $res)) {
                             $candidate[$k] = $res[$k];
                         }
@@ -2308,7 +2309,7 @@ class InstallProtocolManager
         $metadata = $protocol['definition']['metadata'] ?? [];
         $containerName = $metadata['container_name'] ?? $serverData['container_name'] ?? 'amnezia-awg';
         // AWG2: try awg0.conf first (standard), fall back to wg0.conf (legacy)
-        $isAwg2 = (stripos($containerName, 'awg2') !== false || ($protocol['slug'] ?? '') === 'awg2');
+        $isAwg2 = (stripos($containerName, 'awg2') !== false || stripos($containerName, 'awg31') !== false || in_array(($protocol['slug'] ?? ''), ['awg2', 'awg31'], true));
         $configDir = '/opt/amnezia/awg';
         $configFile = $isAwg2 ? 'awg0.conf' : 'wg0.conf';
         $conf = $server->executeCommand("docker exec -i $containerName cat {$configDir}/{$configFile}", true);
@@ -2662,7 +2663,7 @@ class InstallProtocolManager
         $pid = self::resolveProtocolId($protocol);
 
         // AWG2: try awg0.conf first (standard), fall back to wg0.conf (legacy)
-        $isAwg2 = (stripos($containerName, 'awg2') !== false || ($protocol['slug'] ?? '') === 'awg2');
+        $isAwg2 = (stripos($containerName, 'awg2') !== false || stripos($containerName, 'awg31') !== false || in_array(($protocol['slug'] ?? ''), ['awg2', 'awg31'], true));
         $configDir = '/opt/amnezia/awg';
         $configFile = $isAwg2 ? 'awg0.conf' : 'wg0.conf';
         $wgConfig = $server->executeCommand("docker exec -i {$containerArg} cat {$configDir}/{$configFile} 2>/dev/null", true);
