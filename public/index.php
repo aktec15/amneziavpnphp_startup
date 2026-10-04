@@ -1424,6 +1424,9 @@ Router::get('/clients/{id}', function ($params) {
         $qrCodeVpnUrl = '';
         $vpnUrlConfig = '';
         $isAwg2 = false;
+        $isXrayReality = false;
+        $xrayUniversalConfig = '';
+        $xrayUniversalQrCode = '';
         $protocolSlug = '';
         try {
             $pdo = DB::conn();
@@ -1442,6 +1445,7 @@ Router::get('/clients/{id}', function ($params) {
                 $clientData['show_text_content'] = !empty($protocol['show_text_content']);
                 $protocolSlug = $protocol['slug'] ?? '';
                 $isAwg2 = in_array($protocolSlug, ['awg2', 'awg31'], true);
+                $isXrayReality = $protocolSlug === 'xray-reality-advanced';
             }
             if ($protocol && ($protocol['output_template'] ?? '') !== '') {
                 $slug = $protocol['slug'] ?? '';
@@ -1467,6 +1471,19 @@ Router::get('/clients/{id}', function ($params) {
                     // Ignore errors, just don't show the second QR
                 }
             }
+
+            // Keep the stored Xray profile optimized for Amnezia Android, while
+            // exposing a standard Vision URI/QR for other VLESS clients.
+            if ($isXrayReality && str_starts_with((string) ($clientData['config'] ?? ''), 'vless://')) {
+                require_once __DIR__ . '/../inc/QrUtil.php';
+                $xrayUniversalConfig = str_replace(
+                    'flow=xtls-rprx-vision-udp443&',
+                    'flow=xtls-rprx-vision&',
+                    (string) $clientData['config']
+                );
+                $xrayUniversalConfig = str_replace('packetEncoding=xudp&', '', $xrayUniversalConfig);
+                $xrayUniversalQrCode = QrUtil::pngBase64($xrayUniversalConfig, 300, 1, 'Universal VLESS');
+            }
         } catch (Exception $e) {
             $protocolOutput = '';
         }
@@ -1475,7 +1492,10 @@ Router::get('/clients/{id}', function ($params) {
             'protocol_output' => $protocolOutput,
             'qr_code_vpn_url' => $qrCodeVpnUrl,
             'vpn_url_config' => $vpnUrlConfig,
-            'is_awg2' => $isAwg2
+            'is_awg2' => $isAwg2,
+            'is_xray_reality' => $isXrayReality,
+            'xray_universal_config' => $xrayUniversalConfig,
+            'xray_universal_qr_code' => $xrayUniversalQrCode
         ]);
     } catch (Exception $e) {
         http_response_code(404);

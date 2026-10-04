@@ -653,10 +653,11 @@ class QrUtil
             'containers' => [
                 [
                     'xray' => [
-                        // No isThirdPartyConfig flag - treats as native container
                         'last_config' => json_encode($fullConfig, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT),
                         'port' => (string) $port,
-                        'transport_proto' => 'tcp'
+                        'transport_proto' => 'tcp',
+                        // Import the generated JSON as a complete client config.
+                        'isThirdPartyConfig' => true
                     ],
                     'container' => 'amnezia-xray'
                 ]

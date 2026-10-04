@@ -146,9 +146,27 @@
   
   {% if client.qr_code %}
   <div class="bg-white rounded shadow p-6 text-center">
-    <h3 class="font-bold mb-4">QR Code (Simple)</h3>
+    <h3 class="font-bold mb-4">{% if is_xray_reality %}Amnezia Android{% else %}QR Code (Simple){% endif %}</h3>
     <img src="{{ client.qr_code }}" alt="QR Code" class="mx-auto" style="max-width: 300px; width: 100%; height: auto;">
-    <p class="text-sm text-gray-600 mt-2">Scan with Amnezia VPN app</p>
+    <p class="text-sm text-gray-600 mt-2">
+      {% if is_xray_reality %}
+        Optimized for Amnezia Android (Vision UDP/443)
+      {% else %}
+        Scan with Amnezia VPN app
+      {% endif %}
+    </p>
+  </div>
+  {% endif %}
+
+  {% if is_xray_reality and xray_universal_qr_code %}
+  <div class="bg-white rounded shadow p-6 text-center mt-6">
+    <h3 class="font-bold mb-4">Universal VLESS</h3>
+    <img src="{{ xray_universal_qr_code }}" alt="Universal VLESS QR Code" class="mx-auto" style="max-width: 300px; width: 100%; height: auto;">
+    <p class="text-sm text-gray-600 mt-2">Standard Vision profile for Hiddify, v2rayNG, NekoBox and other VLESS clients</p>
+    <textarea id="xrayUniversalConfig" readonly class="w-full mt-4 p-3 border rounded text-xs font-mono" rows="4">{{ xray_universal_config }}</textarea>
+    <button type="button" onclick="copyUniversalConfig()" class="gradient-bg text-white px-4 py-2 rounded mt-3">
+      <i class="fas fa-copy"></i> Copy Universal VLESS Link
+    </button>
   </div>
   {% endif %}
 
@@ -179,6 +197,19 @@
 </div>
 
 <script>
+async function copyUniversalConfig() {
+  const field = document.getElementById('xrayUniversalConfig');
+  if (!field) return;
+
+  try {
+    await navigator.clipboard.writeText(field.value);
+  } catch (error) {
+    field.focus();
+    field.select();
+    document.execCommand('copy');
+  }
+}
+
 function toggleExpirationEdit() {
   const select = document.getElementById('expirationSelect');
   const input = document.getElementById('expirationSeconds');
