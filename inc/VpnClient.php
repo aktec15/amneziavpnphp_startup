@@ -1324,7 +1324,9 @@ class VpnClient
         $config .= "PublicKey = {$serverPublicKey}\n";
         $config .= "PresharedKey = {$presharedKey}\n";
         $config .= "Endpoint = {$serverHost}:{$serverPort}\n";
-        $config .= "AllowedIPs = 0.0.0.0/0, ::/0\n";
+        // The managed servers are IPv4-only. Advertising ::/0 makes mobile
+        // clients send IPv6 into a tunnel that cannot route it.
+        $config .= "AllowedIPs = 0.0.0.0/0\n";
         $config .= "PersistentKeepalive = 25\n\n";
 
         return $config;
